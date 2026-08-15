@@ -12,3 +12,13 @@
 .arScreen #arCanvas{touch-action:none}
 .arScreen .arUI{pointer-events:none}
 .arScreen .arUI button,.arScreen .arUI input,.arScreen .arUI .arSheet,.arScreen .arUI .arTop,.arScreen .arUI .confirm,.arScreen .arUI .drawer,.arScreen .arUI .modal{pointer-events:auto}
+/* V22 spatial scan overlay */
+.scanStage{position:relative;overflow:hidden}
+#scanPreview{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+#scanCamera{position:relative;z-index:1}
+.scanLegend{position:absolute;z-index:5;bottom:10px;left:10px;right:10px;display:flex;gap:10px;flex-wrap:wrap;font-size:10px;background:rgba(4,7,12,.62);padding:7px 9px;border-radius:10px;backdrop-filter:blur(8px)}
+.scanLegend .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;background:#54f2a2}
+
+.versionBadge{margin-top:12px;display:inline-block;padding:6px 9px;border:1px solid #71e8ff33;border-radius:999px;background:#071018;color:#71e8ff;font-size:8px;font-weight:900;letter-spacing:1.4px}.headerVersion{display:block;margin-top:3px;font-size:6px;letter-spacing:1.2px;color:#71e8ff;font-weight:900}
+#scanPreview{opacity:1!important;mix-blend-mode:normal!important}
+.scanFeature{filter:drop-shadow(0 0 5px #ff4d6d)}
