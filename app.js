@@ -4,13 +4,13 @@
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.08';
-const KEY='beyondHome.v27';
+const APP_VERSION='0.09';
+const KEY='beyondHome.v28';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}catch{toast('No se pudo guardar el mapa.');return false}}
 function activeSpace(){return db.spaces.find(s=>s.id===db.active)||null}
 function toast(m){const t=$('arToast'); if(t){t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}else console.log(m)}
@@ -105,11 +105,11 @@ function triangulate(p1,p2,R,t){
   const d1=ray(p1.x,p1.y), d2=mv(mt(R),ray(p2.x,p2.y)), C2=mv(mt(R),t).map(v=>-v);
   const a11=dot(d1,d1), a12=-dot(d1,d2), a22=dot(d2,d2);
   const b1=dot(d1,C2), b2=-dot(d2,C2), det=a11*a22-a12*a12;
-  if(Math.abs(det)<1e-7)return null;
+  if(Math.abs(det)<1e-10)return null;
   const a=(b1*a22-a12*b2)/det, b=(a11*b2-a12*b1)/det;
   const A=d1.map(v=>v*a), B=C2.map((v,i)=>v+d2[i]*b), P=A.map((v,i)=>(v+B[i])*.5);
   const err=Math.hypot(A[0]-B[0],A[1]-B[1],A[2]-B[2]);
-  if(a<=0||b<=0||P[2]<.08||err>.12*Math.max(.1,P[2]))return null;
+  if(a<=0||b<=0||P[2]<.04||err>.38*Math.max(.08,P[2]))return null;
   return{p:P,err};
 }
 function keyFor(p){return `${Math.round(p.x/.045)},${Math.round(p.y/.045)},${Math.round(p.z/.045)}`}
@@ -131,16 +131,19 @@ function poseError(pose,corr){let e=0,n=0;for(const c of corr){const q=project(c
 function refinePose(pose,corr){if(corr.length<6)return{pose,error:999};let cur={R:pose.R.map(r=>r.slice()),t:[...pose.t]};for(let it=0;it<3;it++){const H=Array.from({length:6},()=>Array(6).fill(0)),g=Array(6).fill(0);let used=0;for(const c of corr){const q=project(c.p,cur);if(!q)continue;const rx=c.x-q.x,ry=c.y-q.y;if(Math.hypot(rx,ry)>40)continue;const J=[];for(let k=0;k<6;k++){const pp={R:cur.R.map(r=>r.slice()),t:[...cur.t]},eps=k<3?.004:.003;if(k<3)pp.t[k]+=eps;else pp.R=mul3(compose(k===3?eps:0,k===4?eps:0,k===5?eps:0),pp.R);const qq=project(c.p,pp);J.push(qq?[(qq.x-q.x)/eps,(qq.y-q.y)/eps]:[0,0])}for(let a=0;a<6;a++){g[a]+=J[a][0]*rx+J[a][1]*ry;for(let b=0;b<6;b++)H[a][b]+=J[a][0]*J[b][0]+J[a][1]*J[b][1]}used++}const d=solve(H.map((r,i)=>r.map((v,j)=>v+(i===j?.002:0))),g);if(!d||used<6)break;cur.t=cur.t.map((v,i)=>v+d[i]);cur.R=mul3(compose(d[3],d[4],d[5]),cur.R)}return{pose:cur,error:poseError(cur,corr)}}
 function matchDescriptors(features,map){const arr=[...map.values()].filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24)out.push({f,p:best,e:be})}return out}
 
-const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]};
-function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
+const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]};
+function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
 function scanTime(){return scan.started?(performance.now()-scan.started)/1000:0}
-function secured(){let n=0;for(const p of scan.map.values())if(pointReliability(p)>=.82&&p.n>=3)n++;return n}
+function secured(){let n=0;for(const p of scan.map.values())if(pointReliability(p)>=.55&&p.n>=2)n++;return n}
+function zoneKey(x,y){return Math.min(2,Math.max(0,Math.floor(x/(SW/3))))+','+Math.min(1,Math.max(0,Math.floor(y/(SH/2))));}
+function zoneCount(){let n=0;for(const z of scan.zones.values())if(z.points>=2)n++;return n}
 function coverageScore(){let sum=0,n=0;for(const c of scan.coverage.values()){sum+=c.score;n++}return n?sum/n:0}
-function readiness(){const a=clamp(scan.keyframes/4,0,1),b=clamp(scan.map.size/28,0,1),c=clamp(secured()/7,0,1),d=clamp(scan.baseline/.035,0,1),e=clamp(scan.coverage.size/12,0,1),f=coverageScore();return Math.round(100*(a*.18+b*.25+c*.25+d*.12+e*.08+f*.12))}
-function canSave(){return scanTime()>=5&&scan.keyframes>=3&&scan.map.size>=18&&secured()>=4&&scan.baseline>=.025}
+function readiness(){const a=clamp(scan.keyframes/4,0,1),b=clamp(scan.map.size/24,0,1),c=clamp(secured()/6,0,1),d=clamp(scan.baseline/.012,0,1),e=clamp(zoneCount()/6,0,1),f=clamp(coverageScore(),0,1);return Math.round(100*(a*.14+b*.24+c*.22+d*.10+e*.22+f*.08))}
+function canSave(){return scanTime()>=4&&scan.keyframes>=2&&scan.map.size>=12&&secured()>=3&&zoneCount()>=3}
 function motionLabel(flow){const ax=Math.abs(flow.dx),ay=Math.abs(flow.dy),m=flow.mag;if(m<1.2)return 'QUIETO';if(ax>ay*1.35)return flow.dx>0?'DERECHA':'IZQUIERDA';if(ay>ax*1.35)return flow.dy>0?'ABAJO / TILT':'ARRIBA / TILT';return 'DESPLAZAMIENTO / ROTACIÓN'}
 function updateCoverage(features){for(const f of features){const gx=Math.floor(f.x/16),gy=Math.floor(f.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.seen++;c.score=clamp(c.score*.85+.12,0,1);scan.coverage.set(k,c)}}
 function markCoverageFromPoint(p,q){if(!q)return;const gx=Math.floor(q.x/16),gy=Math.floor(q.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.stable++;c.parallax++;c.score=clamp(c.score+.12,0,1);scan.coverage.set(k,c)}
+function markZone(q){if(!q)return;const k=zoneKey(q.x,q.y),z=scan.zones.get(k)||{seen:0,points:0,last:0};z.seen++;z.points=Math.min(99,z.points+1);z.last=performance.now();scan.zones.set(k,z)}
 function colorForReliability(r){return r>=.82?'#54f2a2':r>=.5?'#ffd166':'#ff4d6d'}
 function updateStableTracks(matches){
   // Visual lock is deliberately independent from successful 3D triangulation.
@@ -193,20 +196,20 @@ function drawScan(features){
       x.strokeStyle=colorForReliability(Math.min(a.r,b.r))+'66';x.lineWidth=1;x.beginPath();x.moveTo(a.sx,a.sy);x.lineTo(b.sx,b.sy);x.stroke();links++;
     }
   }
-  for(const a of projected){x.fillStyle=colorForReliability(a.r);x.shadowColor=x.fillStyle;x.shadowBlur=7;x.beginPath();x.arc(a.sx,a.sy,a.r>=.82?3:a.r>=.5?2.5:2.3,0,Math.PI*2);x.fill();x.shadowBlur=0}
+  for(const a of projected){x.fillStyle=a.r>=.55?'#71e8ff':a.r>=.3?'#ffd166':'#ff4d6d';x.shadowColor=x.fillStyle;x.shadowBlur=7;x.beginPath();x.arc(a.sx,a.sy,a.r>=.82?3:a.r>=.5?2.5:2.3,0,Math.PI*2);x.fill();x.shadowBlur=0}
 
   // Red coverage probes mark image regions that have been observed but still lack reliable 3D.
   for(const [k,cov] of scan.coverage){if(cov.score>=.78)continue;const [gx,gy]=k.split(',').map(Number),cx=(gx*16+8)/SW*w,cy=(gy*16+8)/SH*h;x.fillStyle=`rgba(255,77,109,${.18+.25*(1-cov.score)})`;x.beginPath();x.arc(cx,cy,2.4,0,Math.PI*2);x.fill()}
 
   const p=readiness();
-  $('scanPercent').textContent=p+'%';$('scanPts').textContent=scan.map.size;$('scanRefs').textContent=features.length;$('scanStatus').textContent=`ROJOS ${features.filter(f=>!stableAt(f.x,f.y)||stableAt(f.x,f.y).age<4).length} · FIJADOS ${scan.stable.filter(a=>a.age>=4).length} · 3D ${secured()}`;$('scanTime').textContent=scanTime().toFixed(1);$('scanCoverage').textContent=`${Math.min(30,scan.coverage.size)}/30`;
+  $('scanPercent').textContent=p+'%';$('scanPts').textContent=scan.map.size;$('scanRefs').textContent=features.length;$('scanStatus').textContent=`ROJOS ${features.filter(f=>!stableAt(f.x,f.y)||stableAt(f.x,f.y).age<4).length} · FIJADOS ${scan.stable.filter(a=>a.age>=4).length} · CIAN 3D ${secured()}`;$('scanTime').textContent=scanTime().toFixed(1);$('scanCoverage').textContent=`${zoneCount()}/6 zonas`;
   $('scanQuality').textContent=canSave()?'MAPA ESTABLE':scan.map.size>0?'CONSTRUYENDO 3D':features.length>=12?'REFERENCIAS DETECTADAS':'BUSCANDO TEXTURA';
   $('qualityBar').style.width=p+'%';$('scanFinish').disabled=!canSave();$('scanReady').textContent=canSave()?'✓ suficiente evidencia 3D':'Añade más vistas';
   const motionHUD=$('scanMotion'); if(motionHUD)motionHUD.textContent=`${scan.motionKind} · ${scan.motion.toFixed(1)} px · ${Math.round(scan.coh*100)}% coherencia · ${features.length} refs`;
   const t=scanTime();
   if(t<2){$('scanGuide').textContent='QUÉDATE QUIETO';$('scanHint').textContent='Estamos fijando las primeras referencias visuales.'}
   else if(features.length<12){$('scanGuide').textContent='BUSCA TEXTURA';$('scanHint').textContent='Apunta a esquinas, muebles, libros, marcos o superficies con detalle.'}
-  else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'MUÉVETE EN CUALQUIER DIRECCIÓN':'SIGUE MOVIÉNDOTE';$('scanHint').textContent='Rojo = referencia nueva · verde = referencia visual fijada · cian = evidencia 3D consolidada. Sigue moviéndote para dar profundidad.'}
+  else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'MUÉVETE EN CUALQUIER DIRECCIÓN':'SIGUE MOVIÉNDOTE';$('scanHint').textContent='Rojo = nuevo · verde = fijado · cian = 3D. Recorre 3 zonas con un pequeño desplazamiento lateral; no hace falta caminar.'}
 }
 function scannerLoop(){
   if(!scan.running)return;
@@ -245,7 +248,7 @@ function scannerLoop(){
           const pw=mv(mt(oldPose.R),q.p.map((v,i)=>v-oldPose.t[i]));
           const quality=clamp(.82-Math.min(.65,q.err/Math.max(.025,q.p[2]*.35)),.12,.9);
           fuse(scan.map,pw,m.a.d,quality,q.err);
-          const qq=project(pw,scan.pose);markCoverageFromPoint(pw,qq);added++;
+          const qq=project(pw,scan.pose);markCoverageFromPoint(pw,qq);markZone(qq);added++;
         }
         if(added>0){scan.keyframes++;scan.lastKey=now;scan.baseline=Math.max(scan.baseline,Math.hypot(...rel.t));scan.good+=added}
       }
@@ -273,8 +276,8 @@ async function startScanner(){
     await openCamera($('scanCamera'));
     scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;scan.features=[];
     $('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';
-    const waitHUD=$('scanWait'); if(waitHUD)waitHUD.textContent='Sólo cámara · quieto 1,5 s y después explora';
-    toast('Cámara activa. Mantén el móvil quieto 1,5 s y luego explora lentamente.');
+    const waitHUD=$('scanWait'); if(waitHUD)waitHUD.textContent='Sólo cámara · quieto 1 s y después haz micro-desplazamientos por zonas';
+    toast('Cámara activa. Quieto 1 s; después haz pequeños desplazamientos laterales y cambia de zona.');
     scan.raf=requestAnimationFrame(scannerLoop);
   }catch(e){
     scan.running=false;
@@ -284,7 +287,7 @@ async function startScanner(){
   }
 }
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v27',scale:'relative',version:27,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v28-bogon-zones',scale:'relative',version:28,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------

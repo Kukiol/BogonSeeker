@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#05070b">
 <meta name="mobile-web-app-capable" content="yes">
-<title>BeyondHome · ALFA 0.08 · REU / Bogon</title>
+<title>BeyondHome · ALFA 0.09 · REU / Bogon</title>
 <link rel="stylesheet" href="style.css?v=0.08">
 <meta name="application-version" content="0.08">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -19,14 +19,14 @@
   <canvas id="logo"></canvas>
   <div class="eyebrow">SPATIAL REPRESENTATION</div>
   <div class="brand">Beyond<span>Home</span></div>
-  <div class="versionBadge">ALFA 0.08</div>
+  <div class="versionBadge">ALFA 0.09</div>
   <p>Tu espacio físico. Una capa digital persistente.</p>
   <button id="enter" class="primary heroBtn">ENTRAR <span>→</span></button>
   <small>CÁMARA ONLY · SIN DEPTH SENSOR · SIN LIBRERÍAS</small>
 </section>
 
 <section id="home" class="screen">
-<header class="appHeader"><div><div class="brand mini">Beyond<span>Home</span></div><span class="headerVersion">ALFA 0.08</span></div><div id="capBadge" class="pill">LISTO</div></header>
+<header class="appHeader"><div><div class="brand mini">Beyond<span>Home</span></div><span class="headerVersion">ALFA 0.09</span></div><div id="capBadge" class="pill">LISTO</div></header>
 <div class="pageScroll">
   <div class="heroCopy"><div class="eyebrow">BOGON SPATIAL ENGINE</div><h1>Construye tu capa digital.</h1><p>Escanea el espacio con la cámara, crea un mapa visual y coloca objetos matemáticos que vuelven a aparecer cuando regresas.</p></div>
   <div class="quick"><button id="createSpace" class="quickPrimary"><span>＋</span><b>Nuevo espacio</b><small>Escanear y guardar</small></button><button id="simulation" class="quickDark"><span>◇</span><b>Entrar en AR</b><small>Crear · visualizar</small></button></div>
@@ -50,10 +50,10 @@
    <div class="scanTop"><div><b>ESCANEO MONOCULAR</b><span id="scanReady">Listo para empezar</span></div><strong id="scanPercent">0%</strong></div>
    <div class="scanStage"><video id="scanCamera" autoplay muted playsinline></video><canvas id="scanPreview"></canvas><div id="scanStatus" class="scanStatus"></div></div>
    <div class="scanGuide"><div class="guideArrow" id="guideArrow">●</div><div><b id="scanGuide">QUÉDATE QUIETO</b><span id="scanHint">Después podrás moverte en cualquier dirección.</span></div></div>
-   <div class="scanMetrics"><div class="scanMotion" id="scanMotion">QUIETO · 0.0 px · 0% coherencia · 0 refs</div><div><b id="scanPts">0</b><span>puntos</span></div><div><b id="scanRefs">0</b><span>referencias</span></div><div><b id="scanTime">0.0</b><span>segundos</span></div><div><b id="scanCoverage">0/48</b><span>zonas</span></div></div>
+   <div class="scanMetrics"><div class="scanMotion" id="scanMotion">QUIETO · 0.0 px · 0% coherencia · 0 refs</div><div><b id="scanPts">0</b><span>puntos</span></div><div><b id="scanRefs">0</b><span>referencias</span></div><div><b id="scanTime">0.0</b><span>segundos</span></div><div><b id="scanCoverage">0/6 zonas</b><span>zonas 3D</span></div></div>
    <div class="quality"><div><span>Calidad del mapa</span><b id="scanQuality">Insuficiente</b></div><div class="bar"><i id="qualityBar"></i></div></div>
-   <div class="scanWait" id="scanWait">Sólo cámara · quieto 1,5 s y después explora</div><div class="scanActions"><button id="scanStart" class="primary">INICIAR ESCANEO</button><button id="scanFinish" class="secondary" disabled>GUARDAR</button></div>
-   <div id="scanChecklist" class="checklist"><span>○ 6 vistas cubiertas</span><span>○ 35+ referencias</span><span>○ paralaje suficiente</span></div>
+   <div class="scanWait" id="scanWait">Sólo cámara · quieto 1 s y después haz pequeños desplazamientos por zonas</div><div class="scanActions"><button id="scanStart" class="primary">INICIAR ESCANEO</button><button id="scanFinish" class="secondary" disabled>GUARDAR</button></div>
+   <div id="scanChecklist" class="checklist"><span>○ 3 zonas con 3D</span><span>○ 12+ puntos 3D</span><span>○ micro-paralaje suficiente</span></div>
  </div>
  <p class="microcopy">BeyondHome usa únicamente la cámara. El movimiento visual, las referencias y la triangulación generan un mapa 3D relativo. No se usa GPS, profundidad, IMU ni sensores externos.</p>
 </div></section>
@@ -90,5 +90,5 @@
 
 <section id="vrScreen" class="screen vrScreen"><button id="exitVR" class="dangerFloating">SALIR</button><div class="vrBox"><div class="eyebrow">BEYONDHOME</div><h1>Modo visor</h1><p>Esta versión mantiene el mismo mapa y representación ligera sin exigir WebXR ni sensores especiales.</p></div></section>
 </main>
-<script src="app.js?v=0.08"></script>
+<script src="app.js?v=0.09"></script>
 </body></html>

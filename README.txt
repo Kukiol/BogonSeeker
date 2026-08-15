@@ -1,11 +1,20 @@
-BeyondHome ALFA 0.08
+BeyondHome ALFA 0.09 — Bogon Zones / Tracker Lock
 
-Camera-only monocular spatial mapper / Bogon AR.
+CAMERA ONLY. No GPS, depth sensor, IMU, ARCore, WebXR or external libraries.
 
-Cambios 0.08:
-- Cache del sitio desactivada mediante headers Netlify y assets versionados ?v=0.08.
-- Versión visible y metadatos actualizados a ALFA 0.08.
-- AR muestra marcadores sobre la imagen real: cyan = textura/referencia visual, verde = referencia 3D reconocida.
-- Se resalta "ENFOCA AQUÍ" sobre la mejor referencia visible.
-- La UI explica explícitamente que se usa una cámara RGB normal: no hay depth sensor ni detección de planos por hardware.
-- Persistencia local migra v25 -> v26.
+Changes from 0.08:
+- Scanner now works by 3 spatial screen zones (3x2 grid), not by requiring large movement.
+- A small lateral micro-displacement is enough to create parallax evidence.
+- Triangulation accepts a wider but still bounded reprojection geometry, allowing cyan 3D samples to appear on ordinary RGB cameras.
+- Green points are visual tracking only.
+- CYAN points are consolidated 3D samples.
+- Progress is based on actual 3D zones + samples rather than raw coverage cells.
+- Save requires 3 of 6 zones, 12+ 3D samples, 3 consolidated samples and 2 keyframes.
+- App version/cache-busting updated to 0.09; Netlify no-cache headers retained.
+
+Recommended use:
+1. Hold the phone still for about 1 second.
+2. Aim at a textured area (books, furniture, frame, edge).
+3. Move the phone sideways a few centimetres without rotating much.
+4. Wait for cyan points.
+5. Move to another screen zone and repeat. Three zones are enough to save.
