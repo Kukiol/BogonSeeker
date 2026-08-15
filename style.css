@@ -30,3 +30,11 @@
 #scanPreview{z-index:3!important;opacity:1!important;mix-blend-mode:normal!important}
 .scanStage:after{content:'';position:absolute;inset:0;z-index:2;pointer-events:none;border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
 .scanGuide{margin-top:8px!important;background:#071018!important;backdrop-filter:none!important}
+
+/* ALFA 0.04 — clean camera viewport */
+.scanTarget,.scanLabel,.scanWait,.scanMotion,.scanLegend{display:none!important}
+.scanStatus{display:none!important}
+#camera{display:none;z-index:1;background:#000}
+.cameraScreen #camera{display:block!important}
+.cameraScreen .floatingTop,.cameraScreen .cameraHud,.cameraScreen .cameraCross{z-index:5}
+@media (min-width:700px){.cameraScreen #camera{object-fit:contain;background:#000}.cameraScreen{background:#000}}

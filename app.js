@@ -1,10 +1,10 @@
 'use strict';
-// BeyondHome ALFA 0.03 — camera-only monocular spatial mapper.
+// BeyondHome ALFA 0.04 — camera-only monocular spatial mapper.
 // No GPS is used by the mapper. No depth sensor, IMU, ARCore, WebXR or external libraries.
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const KEY='beyondHome.v23';
+const KEY='beyondHome.v24';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -17,7 +17,7 @@ function show(id){stopScanner();if(id!=='arScreen')stopAR();if(id!=='cameraScree
 $('enter').onclick=()=>show('home');
 async function openCamera(video){if(!navigator.mediaDevices?.getUserMedia)throw Error('Este navegador no permite cámara.');if(stream)stopCamera();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640,max:960},height:{ideal:480,max:720},frameRate:{ideal:20,max:24}},audio:false});video.srcObject=stream;video.muted=true;await video.play().catch(()=>{});}
 function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}['camera','scanCamera','arCamera'].forEach(id=>{const v=$(id);if(v)v.srcObject=null})}
-$('previewCamera').onclick=async()=>{show('cameraScreen');try{await openCamera($('camera'))}catch(e){toast(e.message)}};
+$('previewCamera').onclick=async()=>{show('cameraScreen');try{await openCamera($('camera'));$('cameraInfo').textContent='CÁMARA ACTIVA · SOLO RGB'}catch(e){$('cameraInfo').textContent='ERROR DE CÁMARA · '+e.message;toast(e.message)}};
 $('stopCamera').onclick=()=>{stopCamera();show('home')};document.querySelectorAll('.back').forEach(b=>b.onclick=()=>show('home'));
 $('createSpace').onclick=()=>{show('createScreen');resetScannerUI()};$('previewLocal').onclick=()=>{show('localScreen');renderLocal()};$('spaces').onclick=()=>show('spacesScreen');$('engineInfo').onclick=()=>show('infoScreen');$('simulation').onclick=()=>activeSpace()?show('simScreen'):show('createScreen');
 
@@ -168,7 +168,7 @@ function scannerLoop(){if(!scan.running)return;const now=performance.now();if(no
   scan.prev=g;scan.features=f;drawScan(f);scan.raf=requestAnimationFrame(scannerLoop)}
 async function startScanner(){try{resetScannerUI();await openCamera($('scanCamera'));scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;$('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';$('scanWait').textContent='Sólo cámara · 2 s quieto + explora libremente';toast('Sólo cámara: 2 s quieto y después explora en todas direcciones.');scan.raf=requestAnimationFrame(scannerLoop)}catch(e){toast('No se pudo iniciar la cámara: '+e.message)}}
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v23',scale:'relative',version:23,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v24',scale:'relative',version:24,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------

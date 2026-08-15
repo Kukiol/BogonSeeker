@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#05070b">
 <meta name="mobile-web-app-capable" content="yes">
-<title>BeyondHome · REU / Bogon</title>
+<title>BeyondHome · ALFA 0.04 · REU / Bogon</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,14 +15,14 @@
   <canvas id="logo"></canvas>
   <div class="eyebrow">SPATIAL REPRESENTATION</div>
   <div class="brand">Beyond<span>Home</span></div>
-  <div class="versionBadge">ALFA 0.03</div>
+  <div class="versionBadge">ALFA 0.04</div>
   <p>Tu espacio físico. Una capa digital persistente.</p>
   <button id="enter" class="primary heroBtn">ENTRAR <span>→</span></button>
   <small>CÁMARA ONLY · SIN DEPTH SENSOR · SIN LIBRERÍAS</small>
 </section>
 
 <section id="home" class="screen">
-<header class="appHeader"><div><div class="brand mini">Beyond<span>Home</span></div><span class="headerVersion">ALFA 0.03</span></div><div id="capBadge" class="pill">LISTO</div></header>
+<header class="appHeader"><div><div class="brand mini">Beyond<span>Home</span></div><span class="headerVersion">ALFA 0.04</span></div><div id="capBadge" class="pill">LISTO</div></header>
 <div class="pageScroll">
   <div class="heroCopy"><div class="eyebrow">BOGON SPATIAL ENGINE</div><h1>Construye tu capa digital.</h1><p>Escanea el espacio con la cámara, crea un mapa visual y coloca objetos matemáticos que vuelven a aparecer cuando regresas.</p></div>
   <div class="quick"><button id="createSpace" class="quickPrimary"><span>＋</span><b>Nuevo espacio</b><small>Escanear y guardar</small></button><button id="simulation" class="quickDark"><span>◇</span><b>Entrar en AR</b><small>Crear · visualizar</small></button></div>
@@ -44,7 +44,7 @@
  <div class="origin"><div class="originIcon">◎</div><div><b>ORIGEN LOCAL · SÓLO CÁMARA</b><span id="gps">El origen se fija en la primera cámara.</span></div></div>
  <div class="scanCard">
    <div class="scanTop"><div><b>ESCANEO MONOCULAR</b><span id="scanReady">Listo para empezar</span></div><strong id="scanPercent">0%</strong></div>
-   <div class="scanStage"><video id="scanCamera" autoplay muted playsinline></video><canvas id="scanPreview"></canvas><div class="scanTarget"><span></span></div><div id="scanLabel">Apunta a zonas con textura y recórrelas</div><div id="scanWait" class="scanWait">Preparando referencias…</div><div id="scanMotion" class="scanMotion">MOVIMIENTO: — · TRACKING: —</div><div class="scanLegend"><span><i class="dot green"></i>alta confianza</span><span><i class="dot" style="background:#ffd166"></i>en consolidación</span><span><i class="dot" style="background:#ff4d6d"></i>necesita más evidencia</span></div></div>
+   <div class="scanStage"><video id="scanCamera" autoplay muted playsinline></video><canvas id="scanPreview"></canvas><div id="scanStatus" class="scanStatus"></div></div>
    <div class="scanGuide"><div class="guideArrow" id="guideArrow">●</div><div><b id="scanGuide">QUÉDATE QUIETO</b><span id="scanHint">Después podrás moverte en cualquier dirección.</span></div></div>
    <div class="scanMetrics"><div><b id="scanPts">0</b><span>puntos</span></div><div><b id="scanRefs">0</b><span>referencias</span></div><div><b id="scanTime">0.0</b><span>segundos</span></div><div><b id="scanCoverage">0/48</b><span>zonas</span></div></div>
    <div class="quality"><div><span>Calidad del mapa</span><b id="scanQuality">Insuficiente</b></div><div class="bar"><i id="qualityBar"></i></div></div>
