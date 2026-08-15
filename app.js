@@ -1,11 +1,11 @@
 'use strict';
-// BeyondHome ALFA 0.06 — camera-only monocular spatial mapper.
+// BeyondHome ALFA 0.07 — camera-only monocular spatial mapper.
 // No GPS is used by the mapper. No depth sensor, IMU, ARCore, WebXR or external libraries.
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.06';
-const KEY='beyondHome.v26';
+const APP_VERSION='0.07';
+const KEY='beyondHome.v27';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -180,7 +180,7 @@ function drawScan(features){
   $('scanPercent').textContent=p+'%';$('scanPts').textContent=scan.map.size;$('scanRefs').textContent=features.length;$('scanTime').textContent=scanTime().toFixed(1);$('scanCoverage').textContent=`${Math.min(30,scan.coverage.size)}/30`;
   $('scanQuality').textContent=canSave()?'MAPA ESTABLE':scan.map.size>0?'CONSTRUYENDO 3D':features.length>=12?'REFERENCIAS DETECTADAS':'BUSCANDO TEXTURA';
   $('qualityBar').style.width=p+'%';$('scanFinish').disabled=!canSave();$('scanReady').textContent=canSave()?'✓ suficiente evidencia 3D':'Añade más vistas';
-  $('scanMotion').textContent=`${scan.motionKind} · ${scan.motion.toFixed(1)} px · ${Math.round(scan.coh*100)}% coherencia · ${features.length} refs`;
+  const motionHUD=$('scanMotion'); if(motionHUD)motionHUD.textContent=`${scan.motionKind} · ${scan.motion.toFixed(1)} px · ${Math.round(scan.coh*100)}% coherencia · ${features.length} refs`;
   const t=scanTime();
   if(t<2){$('scanGuide').textContent='QUÉDATE QUIETO';$('scanHint').textContent='Estamos fijando las primeras referencias visuales.'}
   else if(features.length<12){$('scanGuide').textContent='BUSCA TEXTURA';$('scanHint').textContent='Apunta a esquinas, muebles, libros, marcos o superficies con detalle.'}
@@ -251,7 +251,7 @@ async function startScanner(){
     await openCamera($('scanCamera'));
     scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;scan.features=[];
     $('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';
-    $('scanWait').textContent='Sólo cámara · quieto 1,5 s y después explora';
+    const waitHUD=$('scanWait'); if(waitHUD)waitHUD.textContent='Sólo cámara · quieto 1,5 s y después explora';
     toast('Cámara activa. Mantén el móvil quieto 1,5 s y luego explora lentamente.');
     scan.raf=requestAnimationFrame(scannerLoop);
   }catch(e){
