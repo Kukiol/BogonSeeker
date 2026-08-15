@@ -38,3 +38,6 @@
 .cameraScreen #camera{display:block!important}
 .cameraScreen .floatingTop,.cameraScreen .cameraHud,.cameraScreen .cameraCross{z-index:5}
 @media (min-width:700px){.cameraScreen #camera{object-fit:contain;background:#000}.cameraScreen{background:#000}}
+
+/* ALFA 0.05 — responsive scanner */
+.createScreen .pageScroll{max-width:900px;padding:clamp(10px,3vw,28px) clamp(10px,4vw,24px) 36px}.scanStage{width:100%;height:clamp(250px,52svh,520px);min-height:240px;aspect-ratio:4/3}.scanStage video,.scanStage canvas{width:100%;height:100%;object-fit:cover}.scanGuide{min-height:52px}.scanMetrics{grid-template-columns:repeat(4,minmax(0,1fr))}.scanMetrics div{min-width:0}.scanMetrics b{font-size:clamp(11px,2.5vw,14px)}.scanMetrics span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}@media(max-width:600px){.scanStage{height:clamp(235px,48svh,430px);min-height:235px}.scanCard{padding:8px;border-radius:16px}.scanTop{padding:3px 3px 7px}.scanGuide{padding:9px 2px}.scanActions{grid-template-columns:1fr 1fr}.microcopy{font-size:8px}.pageScroll{padding-left:10px!important;padding-right:10px!important}}@media(min-width:900px){.scanStage{height:min(58vh,560px)}}

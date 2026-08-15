@@ -1,21 +1,37 @@
 'use strict';
-// BeyondHome ALFA 0.04 — camera-only monocular spatial mapper.
+// BeyondHome ALFA 0.06 — camera-only monocular spatial mapper.
 // No GPS is used by the mapper. No depth sensor, IMU, ARCore, WebXR or external libraries.
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const KEY='beyondHome.v24';
+const APP_VERSION='0.06';
+const KEY='beyondHome.v26';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}catch{toast('No se pudo guardar el mapa.');return false}}
 function activeSpace(){return db.spaces.find(s=>s.id===db.active)||null}
 function toast(m){const t=$('arToast'); if(t){t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}else console.log(m)}
 function show(id){stopScanner();if(id!=='arScreen')stopAR();if(id!=='cameraScreen'&&id!=='createScreen'&&id!=='arScreen')stopCamera();SCREENS.forEach(s=>$(s)?.classList.toggle('active',s===id));if(id==='spacesScreen')renderSpaces();if(id==='localScreen')renderLocal();if(id==='infoScreen')startInfo();else stopInfo();updateSupport()}
 $('enter').onclick=()=>show('home');
-async function openCamera(video){if(!navigator.mediaDevices?.getUserMedia)throw Error('Este navegador no permite cámara.');if(stream)stopCamera();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640,max:960},height:{ideal:480,max:720},frameRate:{ideal:20,max:24}},audio:false});video.srcObject=stream;video.muted=true;await video.play().catch(()=>{});}
+async function openCamera(video){
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('Este navegador no permite cámara. Usa Chrome/Edge con HTTPS.');
+  if(!video)throw Error('Visor de cámara no encontrado.');
+  if(stream)stopCamera();
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:640,max:1280},height:{ideal:480,max:960},frameRate:{ideal:20,max:30}},audio:false});
+  video.srcObject=stream; video.muted=true; video.setAttribute('playsinline','');
+  await new Promise((resolve,reject)=>{
+    if(video.readyState>=2)return resolve();
+    const ok=()=>{cleanup();resolve()}, bad=()=>{cleanup();reject(new Error('La cámara no entregó frames.'))};
+    const cleanup=()=>{video.removeEventListener('loadeddata',ok);video.removeEventListener('canplay',ok);video.removeEventListener('error',bad)};
+    video.addEventListener('loadeddata',ok,{once:true});video.addEventListener('canplay',ok,{once:true});video.addEventListener('error',bad,{once:true});
+    setTimeout(()=>{if(video.readyState>=2){cleanup();resolve()}},1800);
+  });
+  await video.play();
+  if(video.readyState<2)throw Error('La cámara está activa pero todavía no entrega imágenes.');
+}
 function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}['camera','scanCamera','arCamera'].forEach(id=>{const v=$(id);if(v)v.srcObject=null})}
 $('previewCamera').onclick=async()=>{show('cameraScreen');try{await openCamera($('camera'));$('cameraInfo').textContent='CÁMARA ACTIVA · SOLO RGB'}catch(e){$('cameraInfo').textContent='ERROR DE CÁMARA · '+e.message;toast(e.message)}};
 $('stopCamera').onclick=()=>{stopCamera();show('home')};document.querySelectorAll('.back').forEach(b=>b.onclick=()=>show('home'));
@@ -49,20 +65,28 @@ function descriptor(g,x,y){const a=[];let m=0;for(let j=-6;j<=6;j+=2)for(let i=-
 function scoreCorner(g,x,y){let sxx=0,syy=0,sxy=0;for(let j=-2;j<=2;j++)for(let i=-2;i<=2;i++){const xx=x+i,yy=y+j;const gx=g[yy*SW+xx+1]-g[yy*SW+xx-1];const gy=g[(yy+1)*SW+xx]-g[(yy-1)*SW+xx];sxx+=gx*gx;syy+=gy*gy;sxy+=gx*gy}const det=sxx*syy-sxy*sxy,tr=sxx+syy;return det-.04*tr*tr}
 function detect(g){
   const cand=[];
-  let max=0;
-  for(let y=9;y<SH-9;y+=2){for(let x=9;x<SW-9;x+=2){const s=scoreCorner(g,x,y);if(s>max)max=s;cand.push({x,y,s})}}
-  // Mobile cameras vary enormously in contrast. Do not use a single absolute threshold.
-  cand.sort((a,b)=>b.s-a.s);
-  const threshold=Math.max(700,Math.min(9000,max*.055));
-  const out=[];
-  for(const p of cand){if(p.s<threshold)break;let ok=true;for(const q of out)if((p.x-q.x)**2+(p.y-q.y)**2<49){ok=false;break}if(ok){out.push({...p,d:descriptor(g,p.x,p.y)});if(out.length>=140)break}}
-  // Extremely low-texture scenes still need visible tracking candidates. Use strong local gradients as a fallback.
-  if(out.length<12){
-    const fallback=[];
-    for(let y=10;y<SH-10;y+=4)for(let x=10;x<SW-10;x+=4){const gx=Math.abs(g[y*SW+x+2]-g[y*SW+x-2]);const gy=Math.abs(g[(y+2)*SW+x]-g[(y-2)*SW+x]);const score=gx+gy;if(score>24)fallback.push({x,y,s:score})}
-    fallback.sort((a,b)=>b.s-a.s);
-    for(const p of fallback){let ok=true;for(const q of out)if((p.x-q.x)**2+(p.y-q.y)**2<81){ok=false;break}if(ok){out.push({...p,d:descriptor(g,p.x,p.y)});if(out.length>=32)break}}
+  // Fast, resolution-independent corner/texture score. The threshold is relative to
+  // the current frame so cheap phone cameras with different exposure still produce candidates.
+  for(let y=8;y<SH-8;y+=3){
+    for(let x=8;x<SW-8;x+=3){
+      const gx=Math.abs(g[y*SW+x+3]-g[y*SW+x-3]);
+      const gy=Math.abs(g[(y+3)*SW+x]-g[(y-3)*SW+x]);
+      const d1=Math.abs(g[(y+3)*SW+x+3]-g[(y-3)*SW+x-3]);
+      const d2=Math.abs(g[(y+3)*SW+x-3]-g[(y-3)*SW+x+3]);
+      const score=gx+gy+0.5*(d1+d2);
+      cand.push({x,y,s:score});
+    }
   }
+  cand.sort((a,b)=>b.s-a.s);
+  const max=cand[0]?.s||0, threshold=Math.max(9,max*.20);
+  const out=[];
+  for(const p of cand){
+    if(p.s<threshold)break;
+    let ok=true;
+    for(const q of out)if((p.x-q.x)**2+(p.y-q.y)**2<64){ok=false;break}
+    if(ok){out.push({...p,d:descriptor(g,p.x,p.y)});if(out.length>=96)break}
+  }
+  // Always expose a small set of high-gradient samples. They are visual evidence, not 3D points.
   return out;
 }
 function patchSSD(g,a,b,r=3){let e=0,n=0;for(let j=-r;j<=r;j++)for(let i=-r;i<=r;i++){const av=g[(a.y+j)*SW+a.x+i],bv=g[(b.y+j)*SW+b.x+i];e+=Math.abs(av-bv);n++}return e/n}
@@ -112,8 +136,8 @@ function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,pre
 function scanTime(){return scan.started?(performance.now()-scan.started)/1000:0}
 function secured(){let n=0;for(const p of scan.map.values())if(pointReliability(p)>=.82&&p.n>=3)n++;return n}
 function coverageScore(){let sum=0,n=0;for(const c of scan.coverage.values()){sum+=c.score;n++}return n?sum/n:0}
-function readiness(){const a=clamp(scan.keyframes/5,0,1),b=clamp(scan.map.size/55,0,1),c=clamp(secured()/14,0,1),d=clamp(scan.baseline/.10,0,1),e=clamp(scan.coverage.size/18,0,1),f=coverageScore();return Math.round(100*(a*.18+b*.22+c*.28+d*.12+e*.08+f*.12))}
-function canSave(){return scanTime()>=7&&scan.keyframes>=4&&scan.map.size>=35&&secured()>=8&&scan.baseline>=.055}
+function readiness(){const a=clamp(scan.keyframes/4,0,1),b=clamp(scan.map.size/28,0,1),c=clamp(secured()/7,0,1),d=clamp(scan.baseline/.035,0,1),e=clamp(scan.coverage.size/12,0,1),f=coverageScore();return Math.round(100*(a*.18+b*.25+c*.25+d*.12+e*.08+f*.12))}
+function canSave(){return scanTime()>=5&&scan.keyframes>=3&&scan.map.size>=18&&secured()>=4&&scan.baseline>=.025}
 function motionLabel(flow){const ax=Math.abs(flow.dx),ay=Math.abs(flow.dy),m=flow.mag;if(m<1.2)return 'QUIETO';if(ax>ay*1.35)return flow.dx>0?'DERECHA':'IZQUIERDA';if(ay>ax*1.35)return flow.dy>0?'ABAJO / TILT':'ARRIBA / TILT';return 'DESPLAZAMIENTO / ROTACIÓN'}
 function updateCoverage(features){for(const f of features){const gx=Math.floor(f.x/16),gy=Math.floor(f.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.seen++;c.score=clamp(c.score*.85+.12,0,1);scan.coverage.set(k,c)}}
 function markCoverageFromPoint(p,q){if(!q)return;const gx=Math.floor(q.x/16),gy=Math.floor(q.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.stable++;c.parallax++;c.score=clamp(c.score+.12,0,1);scan.coverage.set(k,c)}
@@ -162,13 +186,83 @@ function drawScan(features){
   else if(features.length<12){$('scanGuide').textContent='BUSCA TEXTURA';$('scanHint').textContent='Apunta a esquinas, muebles, libros, marcos o superficies con detalle.'}
   else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'MUÉVETE EN CUALQUIER DIRECCIÓN':'SIGUE MOVIÉNDOTE';$('scanHint').textContent='Los puntos rojos son referencias todavía no aseguradas. Vuelve a observarlas desde otra posición.'}
 }
-function scannerLoop(){if(!scan.running)return;const now=performance.now();if(now-scan.last<90){scan.raf=requestAnimationFrame(scannerLoop);return}scan.last=now;const g=frame($('scanCamera'));if(!g){scan.raf=requestAnimationFrame(scannerLoop);return}const f=detect(g),matches=scan.prev?trackFeatures(scan.prev,g,scan.features):[],flow=robustFlow(matches);scan.motion=flow.mag;scan.coh=flow.coh;scan.motionKind=motionLabel(flow);scan.lastMotion={dx:flow.dx,dy:flow.dy,mag:flow.mag};updateCoverage(f);const t=scanTime();scan.phase=t<2?'HOLD':t<7?'EXPLORE':'REFINE';if(flow.mag<1.2&&flow.coh>.55)scan.status='STILL';else if(flow.mag>1.8&&flow.coh>.5)scan.status='MOVING';else scan.status=f.length>18?'WEAK':'LOST';
-  if(matches.length>=10&&flow.coh>.38&&flow.mag>0.9&&(!scan.lastKey||now-scan.lastKey>750)){const rel=estimateRelative(matches);if(rel){const oldPose={R:scan.pose.R.map(r=>r.slice()),t:[...scan.pose.t]};const newR=mul3(rel.R,oldPose.R);const newT=mv(rel.R,oldPose.t).map((v,i)=>v+rel.t[i]);scan.pose={R:newR,t:newT};let added=0;for(const m of matches){const q=triangulate(m.a,m.b,rel.R,rel.t);if(!q)continue;const pw=mv(mt(oldPose.R),q.p.map((v,i)=>v-oldPose.t[i]));const err=q.err;const quality=clamp(.9-Math.min(1,err/Math.max(.03,q.p[2]*.25)),.12,.9);fuse(scan.map,pw,m.a.d,quality,err);const qq=project(pw,scan.pose);markCoverageFromPoint(pw,qq);added++}scan.keyframes++;scan.lastKey=now;scan.baseline=Math.max(scan.baseline,Math.hypot(...rel.t));scan.good+=added}}
-  if(scan.map.size>=6){const locks=matchDescriptors(f,scan.map),corr=[];for(const a of locks.slice(0,40))corr.push({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y});if(corr.length>=6){const rr=refinePose(scan.pose,corr);if(rr.error<24)scan.pose=rr.pose}}
-  scan.prev=g;scan.features=f;drawScan(f);scan.raf=requestAnimationFrame(scannerLoop)}
-async function startScanner(){try{resetScannerUI();await openCamera($('scanCamera'));scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;$('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';$('scanWait').textContent='Sólo cámara · 2 s quieto + explora libremente';toast('Sólo cámara: 2 s quieto y después explora en todas direcciones.');scan.raf=requestAnimationFrame(scannerLoop)}catch(e){toast('No se pudo iniciar la cámara: '+e.message)}}
+function scannerLoop(){
+  if(!scan.running)return;
+  const now=performance.now();
+  if(now-scan.last<85){scan.raf=requestAnimationFrame(scannerLoop);return}
+  scan.last=now;
+  try{
+    const video=$('scanCamera');
+    if(!video||video.readyState<2||video.videoWidth<2){
+      $('scanGuide').textContent='INICIALIZANDO CÁMARA';
+      $('scanHint').textContent='Esperando el primer frame…';
+      $('scanQuality').textContent='CÁMARA';
+      scan.raf=requestAnimationFrame(scannerLoop);return;
+    }
+    const g=frame(video);
+    if(!g)throw new Error('frame vacío');
+    const f=detect(g);
+    const matches=scan.prev?trackFeatures(scan.prev,g,scan.features):[];
+    const flow=robustFlow(matches);
+    scan.motion=flow.mag;scan.coh=flow.coh;scan.motionKind=motionLabel(flow);
+    updateCoverage(f);
+    const t=scanTime();scan.phase=t<1.5?'HOLD':t<6?'EXPLORE':'REFINE';
+    if(flow.mag<1.2&&flow.coh>.45)scan.status='STILL';else if(flow.mag>1.4&&flow.coh>.35)scan.status='MOVING';else scan.status=f.length?'TRACKING':'LOW TEXTURE';
+    // Seed the first frame as image references. They stay red until 3D evidence exists.
+    if(!scan.features.length&&f.length){scan.features=f;}
+    if(matches.length>=6&&flow.coh>.25&&flow.mag>.65&&(!scan.lastKey||now-scan.lastKey>650)){
+      const rel=estimateRelative(matches);
+      if(rel){
+        const oldPose={R:scan.pose.R.map(r=>r.slice()),t:[...scan.pose.t]};
+        const newR=mul3(rel.R,oldPose.R);
+        const newT=mv(rel.R,oldPose.t).map((v,i)=>v+rel.t[i]);
+        scan.pose={R:newR,t:newT};
+        let added=0;
+        for(const m of matches){
+          const q=triangulate(m.a,m.b,rel.R,rel.t);if(!q)continue;
+          const pw=mv(mt(oldPose.R),q.p.map((v,i)=>v-oldPose.t[i]));
+          const quality=clamp(.82-Math.min(.65,q.err/Math.max(.025,q.p[2]*.35)),.12,.9);
+          fuse(scan.map,pw,m.a.d,quality,q.err);
+          const qq=project(pw,scan.pose);markCoverageFromPoint(pw,qq);added++;
+        }
+        if(added>0){scan.keyframes++;scan.lastKey=now;scan.baseline=Math.max(scan.baseline,Math.hypot(...rel.t));scan.good+=added}
+      }
+    }
+    if(scan.map.size>=4){
+      const locks=matchDescriptors(f,scan.map),corr=[];
+      for(const a of locks.slice(0,30))corr.push({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y});
+      if(corr.length>=6){const rr=refinePose(scan.pose,corr);if(rr.error<30)scan.pose=rr.pose}
+    }
+    scan.prev=g;scan.features=f;drawScan(f);
+    $('scanGuide').textContent=t<1.5?'QUIETO · FIJANDO REFERENCIAS':(canSave()?'MAPA LISTO':'EXPLORA EL ENTORNO');
+    $('scanHint').textContent=t<1.5?'Mantén el móvil quieto un instante. Después muévelo lentamente en cualquier dirección.':(f.length<10?'Busca textura, esquinas y objetos con detalle.':'Los puntos rojos son referencias visuales; los verdes son 3D consolidados.');
+  }catch(e){
+    console.warn('BeyondHome scanner:',e);
+    $('scanGuide').textContent='ESCÁNER ACTIVO';
+    $('scanHint').textContent='Procesando cámara…';
+  }
+  scan.raf=requestAnimationFrame(scannerLoop);
+}
+async function startScanner(){
+  try{
+    resetScannerUI();
+    $('scanGuide').textContent='INICIALIZANDO CÁMARA';
+    $('scanHint').textContent='Solicitando acceso a la cámara…';
+    await openCamera($('scanCamera'));
+    scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;scan.features=[];
+    $('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';
+    $('scanWait').textContent='Sólo cámara · quieto 1,5 s y después explora';
+    toast('Cámara activa. Mantén el móvil quieto 1,5 s y luego explora lentamente.');
+    scan.raf=requestAnimationFrame(scannerLoop);
+  }catch(e){
+    scan.running=false;
+    $('scanGuide').textContent='CÁMARA NO DISPONIBLE';
+    $('scanHint').textContent=e.message||'Comprueba los permisos de cámara y HTTPS.';
+    toast(e.message||'No se pudo iniciar la cámara.');
+  }
+}
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v24',scale:'relative',version:24,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v26',scale:'relative',version:26,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------
@@ -188,8 +282,46 @@ function arFrame(){const v=$('arCamera');if(!v||v.readyState<2)return null;arWor
 function matchMap(features,s){const arr=(s?.samples||[]).filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24){const q=project([best.x,best.y,best.z],ar.pose);if(q&&Math.hypot(q.x-f.x,q.y-f.y)<38)out.push({f,p:best})}}return out}
 function bogonPoints(o){const n=clamp(Math.round((o.size||.12)/(o.spacing||.02)),3,28),h=(o.size||.12)/2,pts=[];if(o.mode==='edge'){for(let i=0;i<n;i++){const a=-h+2*h*i/(n-1);pts.push([a,-h,-h],[a,h,-h],[a,-h,h],[a,h,h])}}else{for(let face=0;face<6;face++)for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=-h+2*h*i/(n-1),b=-h+2*h*j/(n-1);pts.push(face===0?[a,b,-h]:face===1?[a,b,h]:face===2?[-h,a,b]:face===3?[h,a,b]:face===4?[a,-h,b]:[a,h,b])}}return pts}
 function drawBogon(x,w,h,o,pose){const a=o.anchor,c=project([a.x,a.y,a.z],pose);if(!c)return;const R=compose(o.rx||0,o.ry||0,o.rz||0),pts=[];for(const p of bogonPoints(o)){const q=mv(R,p),s=project([a.x+q[0],a.y+q[1],a.z+q[2]],pose);if(s)pts.push(s)}for(const p of pts){if(p.x<0||p.y<0||p.x>SW||p.y>SH)continue;const near=clamp(1-(p.z-c.z)/(o.size||.12),0,1);x.fillStyle=o.foveated?(near>.66?'#ff5ea8':near>.33?'#a35cff':'#71e8ff'):'#71e8ff';x.fillRect(p.x/SW*w-1,p.y/SH*h-1,2,2)}const h3=(o.size||.12)/2,verts=[[-h3,-h3,-h3],[h3,-h3,-h3],[h3,h3,-h3],[-h3,h3,-h3],[-h3,-h3,h3],[h3,-h3,h3],[h3,h3,h3],[-h3,h3,h3]],edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]],vp=verts.map(p=>{const q=mv(R,p);return project([a.x+q[0],a.y+q[1],a.z+q[2]],pose)});x.strokeStyle='#71e8ff';x.lineWidth=1;for(const [i,j] of edges){const p=vp[i],q=vp[j];if(p&&q){x.beginPath();x.moveTo(p.x/SW*w,p.y/SH*h);x.lineTo(q.x/SW*w,q.y/SH*h);x.stroke()}}}
-function arRender(){if(!ar.running)return;const c=$('arCanvas'),d=devicePixelRatio||1,w=innerWidth,h=innerHeight;if(c.width!==w*d||c.height!==h*d){c.width=w*d;c.height=h*d}const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);const s=activeSpace(),locks=ar.locks||[];if(ar.showMap)for(const a of locks){const q=project([a.p.x,a.p.y,a.p.z],ar.pose);if(q)x.fillStyle='#54f2a2',x.fillRect(q.x/SW*w-1,q.y/SH*h-1,3,3)}if(ar.showObjects)for(const o of ar.objects)drawBogon(x,w,h,o,ar.pose);if(ar.preview)drawBogon(x,w,h,ar.preview,ar.pose);$('cloudCount').textContent=`${ar.objects.length} BOGONES · ${locks.length} REFERENCIAS · ${s?.samples?.length||0} PUNTOS`;ar.raf=requestAnimationFrame(arLoop)}
-function arLoop(){if(!ar.running)return;const now=performance.now();if(now-ar.last<90){ar.raf=requestAnimationFrame(arLoop);return}ar.last=now;const g=arFrame(),s=activeSpace();if(g&&s){const f=detect(g),locks=matchMap(f,s);ar.locks=locks;if(locks.length>=6){const corr=locks.slice(0,30).map(a=>({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y}));const rr=refinePose(ar.pose,corr);if(rr.error<25)ar.pose=rr.pose}$('track').textContent=locks.length>=10?'● MAPA RECONOCIDO':locks.length>=4?'● REFERENCIAS':'○ BUSCANDO';$('arToast').textContent=locks.length>=10?'Mapa reconocido · objetos en coordenadas 3D':'Mueve lentamente el móvil para reconocer el espacio';ar.features=f;ar.prev=g}arRender()}
+function cameraToScreen(px,py,w,h){const scale=Math.max(w/SW,h/SH),dw=SW*scale,dh=SH*scale;return{x:(w-dw)/2+px*scale,y:(h-dh)/2+py*scale}}
+function arRender(){
+  if(!ar.running)return;
+  const c=$('arCanvas'),d=devicePixelRatio||1,w=innerWidth,h=innerHeight;
+  if(c.width!==w*d||c.height!==h*d){c.width=w*d;c.height=h*d}
+  const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);
+  const s=activeSpace(),locks=ar.locks||[],features=ar.features||[];
+
+  // The camera is a normal RGB camera: these markers are visual tracking evidence,
+  // not depth/plane detection. Cyan = usable visual texture, green = matched 3D map point.
+  const matched=new Set(locks.map(a=>a.f));
+  for(const f of features){
+    const q=cameraToScreen(f.x,f.y,w,h);
+    if(q.x<-8||q.y<-8||q.x>w+8||q.y>h+8)continue;
+    const isMatched=matched.has(f),r=isMatched?4:2.6;
+    x.strokeStyle=isMatched?'#54f2a2cc':'#71e8ffbb';x.lineWidth=isMatched?1.5:1;
+    x.beginPath();x.arc(q.x,q.y,r,0,Math.PI*2);x.stroke();
+    if(!isMatched){x.fillStyle='#71e8ff99';x.fillRect(q.x-1,q.y-1,2,2)}
+  }
+  if(ar.showMap)for(const a of locks){
+    const q=project([a.p.x,a.p.y,a.p.z],ar.pose);
+    if(q){const p=cameraToScreen(q.x,q.y,w,h);x.fillStyle='#54f2a2';x.shadowColor='#54f2a2';x.shadowBlur=9;x.beginPath();x.arc(p.x,p.y,3.5,0,Math.PI*2);x.fill();x.shadowBlur=0}
+  }
+  // Highlight the strongest currently visible reference: this tells the user exactly
+  // where to aim the phone instead of presenting a generic AR reticle.
+  const target=features.length?features[0]:null;
+  if(target){
+    const q=cameraToScreen(target.x,target.y,w,h),pulse=7+Math.sin(performance.now()/180)*2;
+    x.strokeStyle='#fff';x.lineWidth=1.5;x.beginPath();x.arc(q.x,q.y,pulse,0,Math.PI*2);x.stroke();
+    x.fillStyle='#fff';x.font='700 9px system-ui';x.fillText('ENFOCA AQUÍ',q.x+10,q.y-8);
+  }
+  if(ar.showObjects)for(const o of ar.objects)drawBogon(x,w,h,o,ar.pose);
+  if(ar.preview)drawBogon(x,w,h,ar.preview,ar.pose);
+  $('cloudCount').textContent=`${ar.objects.length} BOGONES · ${locks.length} REFERENCIAS 3D · ${features.length} MARCAS`;
+  ar.raf=requestAnimationFrame(arLoop);
+}
+function arLoop(){if(!ar.running)return;const now=performance.now();if(now-ar.last<90){ar.raf=requestAnimationFrame(arLoop);return}ar.last=now;const g=arFrame(),s=activeSpace();if(g&&s){const f=detect(g),locks=matchMap(f,s);ar.locks=locks;if(locks.length>=6){const corr=locks.slice(0,30).map(a=>({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y}));const rr=refinePose(ar.pose,corr);if(rr.error<25)ar.pose=rr.pose}$('track').textContent=locks.length>=10?'● MAPA RECONOCIDO':locks.length>=4?'● REFERENCIAS 3D':'○ BUSCANDO TEXTURA';
+    $('reticleText').textContent=locks.length>=10?'Punto verde = referencia 3D reconocida':f.length?'Enfoca esquinas, bordes o textura visible':'Busca una zona con detalle';
+    $('arToast').textContent=locks.length>=10?'Mapa reconocido · mantén el teléfono estable':'Apunta a una esquina, borde o textura y muévete lentamente';
+    ar.features=f;ar.prev=g}arRender()}
 async function startAR(){const s=activeSpace();if(!s){toast('Primero crea un espacio');show('createScreen');return}SCREENS.forEach(id=>$(id)?.classList.toggle('active',id==='arScreen'));try{await openCamera($('arCamera'))}catch(e){toast(e.message);return}ar.running=true;ar.pose={R:I3(),t:[0,0,0]};ar.objects=(s.objects||[]).map(o=>({...o}));ar.preview=null;ar.locks=[];ar.last=0;$('arSpaceName').textContent=s.name.toUpperCase();$('arToast').textContent='Sólo cámara · busca el espacio guardado';arLoop()}
 function stopAR(){ar.running=false;cancelAnimationFrame(ar.raf);ar.preview=null;ar.locks=[]}
 function placeAt(x,y){if(!ar.edit)return toast('Modo visualización: no se puede crear.');const s=activeSpace(),arr=s?.samples||[];let best=null,bd=999;for(const p of arr){if(p.n<3||p.confidence<.58)continue;const q=project([p.x,p.y,p.z],ar.pose);if(!q)continue;const d=Math.hypot(q.x-x*SW,q.y-y*SH);if(d<bd){bd=d;best=p}}if(!best||bd>30)return toast('Apunta a un punto verde consolidado.');ar.preview={anchor:{x:best.x,y:best.y,z:best.z},size:ar.size,spacing:ar.spacing,mode:ar.mode,foveated:ar.foveated};$('confirmPos').textContent=`Anclaje 3D · ${best.n} observaciones`;$('confirm').classList.remove('hidden')}

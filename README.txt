@@ -1,7 +1,11 @@
-BeyondHome ALFA 0.04 — Camera Only.
+BeyondHome ALFA 0.06
 
-GitHub Pages: index.html must be at repository root.
-Camera preview is visible on desktop and mobile.
-No depth sensor, GPS, IMU, ARCore, WebXR or external libraries.
+Camera-only monocular spatial mapper / Bogon AR.
 
-If GitHub Pages shows an older version, use Ctrl+F5 on desktop or clear the site data/cache on mobile.
+Cambios 0.06:
+- Cache del sitio desactivada mediante headers Netlify y assets versionados ?v=0.06.
+- Versión visible y metadatos actualizados a ALFA 0.06.
+- AR muestra marcadores sobre la imagen real: cyan = textura/referencia visual, verde = referencia 3D reconocida.
+- Se resalta "ENFOCA AQUÍ" sobre la mejor referencia visible.
+- La UI explica explícitamente que se usa una cámara RGB normal: no hay depth sensor ni detección de planos por hardware.
+- Persistencia local migra v25 -> v26.
