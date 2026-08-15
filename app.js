@@ -4,7 +4,7 @@
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.07';
+const APP_VERSION='0.08';
 const KEY='beyondHome.v27';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
@@ -131,8 +131,8 @@ function poseError(pose,corr){let e=0,n=0;for(const c of corr){const q=project(c
 function refinePose(pose,corr){if(corr.length<6)return{pose,error:999};let cur={R:pose.R.map(r=>r.slice()),t:[...pose.t]};for(let it=0;it<3;it++){const H=Array.from({length:6},()=>Array(6).fill(0)),g=Array(6).fill(0);let used=0;for(const c of corr){const q=project(c.p,cur);if(!q)continue;const rx=c.x-q.x,ry=c.y-q.y;if(Math.hypot(rx,ry)>40)continue;const J=[];for(let k=0;k<6;k++){const pp={R:cur.R.map(r=>r.slice()),t:[...cur.t]},eps=k<3?.004:.003;if(k<3)pp.t[k]+=eps;else pp.R=mul3(compose(k===3?eps:0,k===4?eps:0,k===5?eps:0),pp.R);const qq=project(c.p,pp);J.push(qq?[(qq.x-q.x)/eps,(qq.y-q.y)/eps]:[0,0])}for(let a=0;a<6;a++){g[a]+=J[a][0]*rx+J[a][1]*ry;for(let b=0;b<6;b++)H[a][b]+=J[a][0]*J[b][0]+J[a][1]*J[b][1]}used++}const d=solve(H.map((r,i)=>r.map((v,j)=>v+(i===j?.002:0))),g);if(!d||used<6)break;cur.t=cur.t.map((v,i)=>v+d[i]);cur.R=mul3(compose(d[3],d[4],d[5]),cur.R)}return{pose:cur,error:poseError(cur,corr)}}
 function matchDescriptors(features,map){const arr=[...map.values()].filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24)out.push({f,p:best,e:be})}return out}
 
-const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0}};
-function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0}});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
+const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]};
+function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
 function scanTime(){return scan.started?(performance.now()-scan.started)/1000:0}
 function secured(){let n=0;for(const p of scan.map.values())if(pointReliability(p)>=.82&&p.n>=3)n++;return n}
 function coverageScore(){let sum=0,n=0;for(const c of scan.coverage.values()){sum+=c.score;n++}return n?sum/n:0}
@@ -142,17 +142,39 @@ function motionLabel(flow){const ax=Math.abs(flow.dx),ay=Math.abs(flow.dy),m=flo
 function updateCoverage(features){for(const f of features){const gx=Math.floor(f.x/16),gy=Math.floor(f.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.seen++;c.score=clamp(c.score*.85+.12,0,1);scan.coverage.set(k,c)}}
 function markCoverageFromPoint(p,q){if(!q)return;const gx=Math.floor(q.x/16),gy=Math.floor(q.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.stable++;c.parallax++;c.score=clamp(c.score+.12,0,1);scan.coverage.set(k,c)}
 function colorForReliability(r){return r>=.82?'#54f2a2':r>=.5?'#ffd166':'#ff4d6d'}
+function updateStableTracks(matches){
+  // Visual lock is deliberately independent from successful 3D triangulation.
+  // A normal RGB camera can track a feature reliably before monocular depth is
+  // solved. Keeping these two states separate prevents every point remaining red.
+  const next=[];
+  for(const m of matches){
+    const x=m.b.x,y=m.b.y;
+    let best=null,bd=18;
+    for(const a of scan.stable){const d=Math.hypot(a.x-x,a.y-y);if(d<bd){bd=d;best=a}}
+    if(best){next.push({x:x*.65+best.x*.35,y:y*.65+best.y*.35,age:Math.min(30,best.age+1),confidence:Math.min(1,best.confidence+.08)});best._used=true}
+    else next.push({x,y,age:1,confidence:.25});
+  }
+  // Keep a few recently lost locks alive, so a brief tracker miss does not flash red.
+  for(const a of scan.stable)if(!a._used&&a.age>=5)next.push({x:a.x,y:a.y,age:Math.max(0,a.age-2),confidence:a.confidence*.88});
+  scan.stable=next.filter(a=>a.age>0).slice(0,120);
+  for(const a of scan.stable)delete a._used;
+}
+function stableAt(x,y){let best=null,bd=12;for(const a of scan.stable){const d=Math.hypot(a.x-x,a.y-y);if(d<bd){bd=d;best=a}}return best}
 function drawScan(features){
   const c=$('scanPreview'),d=devicePixelRatio||1,w=c.clientWidth||320,h=c.clientHeight||360;
   if(c.width!==w*d||c.height!==h*d){c.width=w*d;c.height=h*d}
   const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);
 
-  // Live visual evidence: every currently tracked feature is shown immediately.
-  // Red means “seen in the camera, but not yet reconstructed in stable 3D”.
+  // Two-stage visual state:
+  // RED = newly detected image feature.
+  // GREEN = same image feature tracked consistently for several frames.
+  // A green point does NOT claim solved depth; 3D confidence is drawn separately.
   for(const f of features){
+    const a=stableAt(f.x,f.y),locked=!!a&&a.age>=4;
     const sx=f.x/SW*w,sy=f.y/SH*h;
-    x.fillStyle='#ff4d6d';x.shadowColor='#ff4d6d';x.shadowBlur=7;
-    x.beginPath();x.arc(sx,sy,2.5,0,Math.PI*2);x.fill();x.shadowBlur=0;
+    x.fillStyle=locked?'#54f2a2':'#ff4d6d';x.shadowColor=x.fillStyle;x.shadowBlur=locked?9:7;
+    x.beginPath();x.arc(sx,sy,locked?3.2:2.5,0,Math.PI*2);x.fill();x.shadowBlur=0;
+    if(locked){x.strokeStyle='#54f2a288';x.lineWidth=1;x.beginPath();x.arc(sx,sy,6,0,Math.PI*2);x.stroke()}
   }
 
   const projected=[];
@@ -177,14 +199,14 @@ function drawScan(features){
   for(const [k,cov] of scan.coverage){if(cov.score>=.78)continue;const [gx,gy]=k.split(',').map(Number),cx=(gx*16+8)/SW*w,cy=(gy*16+8)/SH*h;x.fillStyle=`rgba(255,77,109,${.18+.25*(1-cov.score)})`;x.beginPath();x.arc(cx,cy,2.4,0,Math.PI*2);x.fill()}
 
   const p=readiness();
-  $('scanPercent').textContent=p+'%';$('scanPts').textContent=scan.map.size;$('scanRefs').textContent=features.length;$('scanTime').textContent=scanTime().toFixed(1);$('scanCoverage').textContent=`${Math.min(30,scan.coverage.size)}/30`;
+  $('scanPercent').textContent=p+'%';$('scanPts').textContent=scan.map.size;$('scanRefs').textContent=features.length;$('scanStatus').textContent=`ROJOS ${features.filter(f=>!stableAt(f.x,f.y)||stableAt(f.x,f.y).age<4).length} · FIJADOS ${scan.stable.filter(a=>a.age>=4).length} · 3D ${secured()}`;$('scanTime').textContent=scanTime().toFixed(1);$('scanCoverage').textContent=`${Math.min(30,scan.coverage.size)}/30`;
   $('scanQuality').textContent=canSave()?'MAPA ESTABLE':scan.map.size>0?'CONSTRUYENDO 3D':features.length>=12?'REFERENCIAS DETECTADAS':'BUSCANDO TEXTURA';
   $('qualityBar').style.width=p+'%';$('scanFinish').disabled=!canSave();$('scanReady').textContent=canSave()?'✓ suficiente evidencia 3D':'Añade más vistas';
   const motionHUD=$('scanMotion'); if(motionHUD)motionHUD.textContent=`${scan.motionKind} · ${scan.motion.toFixed(1)} px · ${Math.round(scan.coh*100)}% coherencia · ${features.length} refs`;
   const t=scanTime();
   if(t<2){$('scanGuide').textContent='QUÉDATE QUIETO';$('scanHint').textContent='Estamos fijando las primeras referencias visuales.'}
   else if(features.length<12){$('scanGuide').textContent='BUSCA TEXTURA';$('scanHint').textContent='Apunta a esquinas, muebles, libros, marcos o superficies con detalle.'}
-  else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'MUÉVETE EN CUALQUIER DIRECCIÓN':'SIGUE MOVIÉNDOTE';$('scanHint').textContent='Los puntos rojos son referencias todavía no aseguradas. Vuelve a observarlas desde otra posición.'}
+  else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'MUÉVETE EN CUALQUIER DIRECCIÓN':'SIGUE MOVIÉNDOTE';$('scanHint').textContent='Rojo = referencia nueva · verde = referencia visual fijada · cian = evidencia 3D consolidada. Sigue moviéndote para dar profundidad.'}
 }
 function scannerLoop(){
   if(!scan.running)return;
@@ -233,9 +255,9 @@ function scannerLoop(){
       for(const a of locks.slice(0,30))corr.push({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y});
       if(corr.length>=6){const rr=refinePose(scan.pose,corr);if(rr.error<30)scan.pose=rr.pose}
     }
-    scan.prev=g;scan.features=f;drawScan(f);
+    updateStableTracks(matches);scan.prev=g;scan.features=f;drawScan(f);
     $('scanGuide').textContent=t<1.5?'QUIETO · FIJANDO REFERENCIAS':(canSave()?'MAPA LISTO':'EXPLORA EL ENTORNO');
-    $('scanHint').textContent=t<1.5?'Mantén el móvil quieto un instante. Después muévelo lentamente en cualquier dirección.':(f.length<10?'Busca textura, esquinas y objetos con detalle.':'Los puntos rojos son referencias visuales; los verdes son 3D consolidados.');
+    $('scanHint').textContent=t<1.5?'Mantén el móvil quieto un instante. Después muévelo lentamente en cualquier dirección.':(f.length<10?'Busca textura, esquinas y objetos con detalle.':'Rojo = referencia nueva; verde = referencia visual fijada; cian = 3D consolidado.');
   }catch(e){
     console.warn('BeyondHome scanner:',e);
     $('scanGuide').textContent='ESCÁNER ACTIVO';
@@ -262,7 +284,7 @@ async function startScanner(){
   }
 }
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v26',scale:'relative',version:26,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v27',scale:'relative',version:27,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------
