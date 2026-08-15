@@ -1,8 +1,0 @@
-[build]
-  publish = "."
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Permissions-Policy = "camera=(self), microphone=()"
-    Cache-Control = "no-cache"
