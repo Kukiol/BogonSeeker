@@ -22,3 +22,11 @@
 .versionBadge{margin-top:12px;display:inline-block;padding:6px 9px;border:1px solid #71e8ff33;border-radius:999px;background:#071018;color:#71e8ff;font-size:8px;font-weight:900;letter-spacing:1.4px}.headerVersion{display:block;margin-top:3px;font-size:6px;letter-spacing:1.2px;color:#71e8ff;font-weight:900}
 #scanPreview{opacity:1!important;mix-blend-mode:normal!important}
 .scanFeature{filter:drop-shadow(0 0 5px #ff4d6d)}
+
+/* ALFA 0.03 — clean scan viewport */
+.scanStage{background:#000;isolation:isolate}
+.scanStage .scanTarget,.scanStage #scanLabel,.scanStage #scanWait,.scanStage #scanMotion,.scanStage .scanLegend{display:none!important}
+#scanCamera{z-index:1!important;display:block;object-fit:cover;background:#000}
+#scanPreview{z-index:3!important;opacity:1!important;mix-blend-mode:normal!important}
+.scanStage:after{content:'';position:absolute;inset:0;z-index:2;pointer-events:none;border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.scanGuide{margin-top:8px!important;background:#071018!important;backdrop-filter:none!important}

@@ -11,3 +11,6 @@ El mapeo usa únicamente la cámara RGB. No usa GPS, acelerómetro, giroscopio, 
 Escaneo recomendado: 2 s quieto y después desplazar lentamente el teléfono 30–50 cm, volver a observar las mismas referencias y recorrer otra zona. El mapa es monocular y su escala es relativa.
 
 Para probarlo: descomprime y arrastra la carpeta a Netlify Drop, o publícala en un sitio HTTPS.
+
+
+ALFA 0.03: visor de escaneo limpiado; se eliminan overlays grises dentro de la cámara y se mantienen únicamente la cámara y la geometría reconstruida.
