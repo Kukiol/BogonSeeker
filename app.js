@@ -4,7 +4,7 @@
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.10';
+const APP_VERSION='0.11';
 const KEY='beyondHome.v30';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
@@ -109,13 +109,21 @@ function triangulate(p1,p2,R,t){
   const a=(b1*a22-a12*b2)/det, b=(a11*b2-a12*b1)/det;
   const A=d1.map(v=>v*a), B=C2.map((v,i)=>v+d2[i]*b), P=A.map((v,i)=>(v+B[i])*.5);
   const err=Math.hypot(A[0]-B[0],A[1]-B[1],A[2]-B[2]);
-  if(a<=0||b<=0||P[2]<.04||err>.38*Math.max(.08,P[2]))return null;
+  if(a<=0||b<=0||P[2]<.025)return null;
+  // The mapper is intentionally tolerant: this is a provisional Bogon point,
+  // not a photogrammetry-grade measurement. Keep points with moderate ray error
+  // and let repeated observations/fusion stabilize them later.
+  if(err>.85*Math.max(.08,P[2]))return null;
   return{p:P,err};
 }
 function keyFor(p){return `${Math.round(p.x/.045)},${Math.round(p.y/.045)},${Math.round(p.z/.045)}`}
 function fuse(map,p,d,quality=0.25,err=0.02,trackerId=null){
-  const k=keyFor(p),old=map.get(k);
-  if(!old){map.set(k,{x:p.x,y:p.y,z:p.z,n:1,obs:1,trackers:trackerId?[trackerId]:[],confidence:clamp(quality,0.05,.95),d,err});return}
+  // A tracker identity is a stronger key than a noisy provisional XYZ estimate.
+  // Once a tracker becomes spatial, all later observations reinforce the same
+  // Bogon point instead of spawning a new nearby point.
+  const remembered=trackerId?scan.trackKeys.get(trackerId):null;
+  const k=remembered||keyFor(p),old=map.get(k);
+  if(!old){map.set(k,{x:p.x,y:p.y,z:p.z,n:1,obs:1,trackers:trackerId?[trackerId]:[],confidence:clamp(quality,0.05,.95),d,err});if(trackerId)scan.trackKeys.set(trackerId,k);return}
   const n=old.n+1;
   const w=1/n;
   old.x+=(p.x-old.x)*w;old.y+=(p.y-old.y)*w;old.z+=(p.z-old.z)*w;
@@ -124,26 +132,43 @@ function fuse(map,p,d,quality=0.25,err=0.02,trackerId=null){
   old.confidence=clamp(old.confidence+(q-old.confidence)*.22,0,1);
   old.err=old.err+(err-old.err)*.18;
   if(!old.d)old.d=d;
+  if(trackerId)scan.trackKeys.set(trackerId,k);
 }
 function pointReliability(p){return clamp(p.confidence*(1-Math.min(1,(p.err||0)/.08)),0,1)}
-function estimateRelative(ms){const f=robustFlow(ms),s=similarity(ms);if(!s||f.coh<.55||f.mag<1.8)return null;const yaw=-s.dx/FX*.55,pitch=s.dy/FY*.25;const radial=median(ms.map(m=>{const x=m.a.x-CX,y=m.a.y-CY,l=Math.hypot(x,y)||1;return (m.b.x-m.a.x)*(x/l)+(m.b.y-m.a.y)*(y/l)}));let v=[-s.dx/FX,s.dy/FY,-radial/Math.max(20,SH)];const n=Math.hypot(...v)||1;v=v.map(x=>x/n);return{R:compose(pitch,yaw,0),t:v.map(x=>x*.12),flow:f,sim:s}}
+function estimateRelative(ms){
+  const f=robustFlow(ms),s=similarity(ms);
+  // We deliberately do NOT wait for a high-precision SfM solution here.
+  // A normal RGB phone camera only gives us image motion; for the Bogon mapper
+  // that motion is enough to create a provisional local spatial hypothesis.
+  if(!s||f.coh<.25||f.mag<.45)return null;
+  const yaw=-s.dx/FX*.55,pitch=s.dy/FY*.25;
+  const radial=median(ms.map(m=>{const x=m.a.x-CX,y=m.a.y-CY,l=Math.hypot(x,y)||1;return (m.b.x-m.a.x)*(x/l)+(m.b.y-m.a.y)*(y/l)}));
+  let v=[-s.dx/FX,s.dy/FY,-radial/Math.max(20,SH)];
+  // If the observed motion is close to pure rotation, choose a stable lateral
+  // baseline instead of throwing the whole frame away.
+  if(Math.hypot(...v)<.08)v=[s.dx>=0?-1:1,0,0];
+  const n=Math.hypot(...v)||1;v=v.map(x=>x/n);
+  const baseline=clamp(.018+f.mag/1400,.018,.065);
+  return{R:compose(pitch,yaw,0),t:v.map(x=>x*baseline),flow:f,sim:s,baseline};
+}
 function poseError(pose,corr){let e=0,n=0;for(const c of corr){const q=project(c.p,pose);if(!q)continue;const d=Math.hypot(q.x-c.x,q.y-c.y);if(d<35){e+=d;n++}}return n?e/n:999}
 function refinePose(pose,corr){if(corr.length<6)return{pose,error:999};let cur={R:pose.R.map(r=>r.slice()),t:[...pose.t]};for(let it=0;it<3;it++){const H=Array.from({length:6},()=>Array(6).fill(0)),g=Array(6).fill(0);let used=0;for(const c of corr){const q=project(c.p,cur);if(!q)continue;const rx=c.x-q.x,ry=c.y-q.y;if(Math.hypot(rx,ry)>40)continue;const J=[];for(let k=0;k<6;k++){const pp={R:cur.R.map(r=>r.slice()),t:[...cur.t]},eps=k<3?.004:.003;if(k<3)pp.t[k]+=eps;else pp.R=mul3(compose(k===3?eps:0,k===4?eps:0,k===5?eps:0),pp.R);const qq=project(c.p,pp);J.push(qq?[(qq.x-q.x)/eps,(qq.y-q.y)/eps]:[0,0])}for(let a=0;a<6;a++){g[a]+=J[a][0]*rx+J[a][1]*ry;for(let b=0;b<6;b++)H[a][b]+=J[a][0]*J[b][0]+J[a][1]*J[b][1]}used++}const d=solve(H.map((r,i)=>r.map((v,j)=>v+(i===j?.002:0))),g);if(!d||used<6)break;cur.t=cur.t.map((v,i)=>v+d[i]);cur.R=mul3(compose(d[3],d[4],d[5]),cur.R)}return{pose:cur,error:poseError(cur,corr)}}
 function matchDescriptors(features,map){const arr=[...map.values()].filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24)out.push({f,p:best,e:be})}return out}
 
-const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]};
-function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[]});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
+const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[],trackKeys:new Map()};
+function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[],trackKeys:new Map()});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
 function scanTime(){return scan.started?(performance.now()-scan.started)/1000:0}
-function secured(){let n=0;for(const p of scan.map.values())if(pointReliability(p)>=.35&&p.n>=2)n++;return n}
+function secured(){let ids=new Set();for(const p of scan.map.values()){if(p.n>=2)for(const id of (p.trackers||[]))ids.add(id)}return ids.size}
 function zoneKey(x,y){return Math.min(2,Math.max(0,Math.floor(x/(SW/3))))+','+Math.min(1,Math.max(0,Math.floor(y/(SH/2))));}
-function zoneCount(){let n=0;for(const z of scan.zones.values())if(z.points>=2)n++;return n}
+function zoneCount(){let n=0;for(const z of scan.zones.values())if(z.seen>=3)n++;return n}
 function coverageScore(){let sum=0,n=0;for(const c of scan.coverage.values()){sum+=c.score;n++}return n?sum/n:0}
-function readiness(){const a=clamp(scan.keyframes/4,0,1),b=clamp(scan.map.size/24,0,1),c=clamp(secured()/6,0,1),d=clamp(scan.baseline/.012,0,1),e=clamp(zoneCount()/6,0,1),f=clamp(coverageScore(),0,1);return Math.round(100*(a*.14+b*.24+c*.22+d*.10+e*.22+f*.08))}
-function canSave(){return scanTime()>=2&&scan.stable.filter(a=>a.hits>=3).length>=6&&secured()>=2}
+function readiness(){const a=clamp(scan.keyframes/3,0,1),b=clamp(scan.map.size/10,0,1),c=clamp(secured()/4,0,1),d=clamp(scan.baseline/.010,0,1),e=clamp(zoneCount()/4,0,1),f=clamp(coverageScore(),0,1);return Math.round(100*(a*.10+b*.12+c*.25+d*.05+e*.40+f*.08))}
+function canSave(){return scanTime()>=2&&zoneCount()>=3&&secured()>=4}
 function motionLabel(flow){const ax=Math.abs(flow.dx),ay=Math.abs(flow.dy),m=flow.mag;if(m<1.2)return 'QUIETO';if(ax>ay*1.35)return flow.dx>0?'DERECHA':'IZQUIERDA';if(ay>ax*1.35)return flow.dy>0?'ABAJO / TILT':'ARRIBA / TILT';return 'DESPLAZAMIENTO / ROTACIÓN'}
 function updateCoverage(features){for(const f of features){const gx=Math.floor(f.x/16),gy=Math.floor(f.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.seen++;c.score=clamp(c.score*.85+.12,0,1);scan.coverage.set(k,c)}}
 function markCoverageFromPoint(p,q){if(!q)return;const gx=Math.floor(q.x/16),gy=Math.floor(q.y/16),k=gx+','+gy,c=scan.coverage.get(k)||{seen:0,stable:0,parallax:0,score:0};c.stable++;c.parallax++;c.score=clamp(c.score+.12,0,1);scan.coverage.set(k,c)}
 function markZone(q){if(!q)return;const k=zoneKey(q.x,q.y),z=scan.zones.get(k)||{seen:0,points:0,last:0};z.seen++;z.points=Math.min(99,z.points+1);z.last=performance.now();scan.zones.set(k,z)}
+function spatialForTracker(id){if(!id)return null;const k=scan.trackKeys.get(id);return k?scan.map.get(k)||null:null}
 function colorForReliability(r){return r>=.82?'#54f2a2':r>=.5?'#ffd166':'#ff4d6d'}
 function updateStableTracks(matches){
   // Tracker state is intentionally much less demanding than 3D reconstruction.
@@ -192,7 +217,11 @@ function drawScan(features){
   // BLUE   = triangulated fixed spatial point; part of the final Bogon mesh.
   for(const f of features){
     const a=stableAt(f.x,f.y);
-    const blue=[...scan.map.values()].some(p=>{const q=project([p.x,p.y,p.z],scan.pose);return q&&Math.hypot(q.x-f.x,q.y-f.y)<13&&p.n>=2});
+    const spatial=a?spatialForTracker(a.id):null;
+    // Blue is deliberately a coarse spatial lock, not photogrammetry precision.
+    // Once the same tracker has contributed to several observations we can
+    // anchor it to the provisional Bogon space and refine it later.
+    const blue=!!(spatial&&spatial.n>=2);
     const state=blue?'blue':trackerState(a),color=stateColor(state);
     const sx=f.x/SW*w,sy=f.y/SH*h;
     x.fillStyle=color;x.shadowColor=color;x.shadowBlur=state==='blue'||state==='green'?9:6;
@@ -229,7 +258,7 @@ function drawScan(features){
   const t=scanTime();
   if(t<2){$('scanGuide').textContent='QUÉDATE QUIETO';$('scanHint').textContent='Estamos fijando las primeras referencias visuales.'}
   else if(features.length<12){$('scanGuide').textContent='BUSCA TEXTURA';$('scanHint').textContent='Apunta a esquinas, muebles, libros, marcos o superficies con detalle.'}
-  else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'MUÉVETE EN CUALQUIER DIRECCIÓN':'SIGUE MOVIÉNDOTE';$('scanHint').textContent='Rojo = nuevo · verde = fijado · cian = 3D. Recorre 3 zonas con un pequeño desplazamiento lateral; no hace falta caminar.'}
+  else {$('scanGuide').textContent=scan.motionKind==='QUIETO'?'GIRA LENTAMENTE POR LA HABITACIÓN':'SIGUE SUAVEMENTE';$('scanHint').textContent='Buscamos la forma general por zonas. No necesitas acercarte ni escanear el detalle; el detalle se hará después.'}
 }
 function scannerLoop(){
   if(!scan.running)return;
@@ -251,11 +280,14 @@ function scannerLoop(){
     const flow=robustFlow(matches);
     scan.motion=flow.mag;scan.coh=flow.coh;scan.motionKind=motionLabel(flow);
     updateCoverage(f);
+    // Room scanning is coarse: a zone becomes known from repeated visual
+    // occupation, even before a precise 3D solution exists.
+    for(const ff of f)markZone(ff);
     const t=scanTime();scan.phase=t<1.5?'HOLD':t<6?'EXPLORE':'REFINE';
     if(flow.mag<1.2&&flow.coh>.45)scan.status='STILL';else if(flow.mag>1.4&&flow.coh>.35)scan.status='MOVING';else scan.status=f.length?'TRACKING':'LOW TEXTURE';
     // Seed the first frame as image references. They stay red until 3D evidence exists.
     if(!scan.features.length&&f.length){scan.features=f;}
-    if(matches.length>=6&&flow.coh>.25&&flow.mag>.65&&(!scan.lastKey||now-scan.lastKey>650)){
+    if(matches.length>=6&&flow.coh>.20&&flow.mag>.45&&(!scan.lastKey||now-scan.lastKey>480)){
       const rel=estimateRelative(matches);
       if(rel){
         const oldPose={R:scan.pose.R.map(r=>r.slice()),t:[...scan.pose.t]};
@@ -264,11 +296,20 @@ function scannerLoop(){
         scan.pose={R:newR,t:newT};
         let added=0;
         for(const m of matches){
-          const q=triangulate(m.a,m.b,rel.R,rel.t);if(!q)continue;
+          let q=triangulate(m.a,m.b,rel.R,rel.t);
+          // Fallback: estimate a provisional depth directly from parallax.
+          // This is deliberately coarse and is later stabilized by fusion.
+          if(!q){
+            const par=Math.hypot(m.b.x-m.a.x,m.b.y-m.a.y);
+            if(par<.35)continue;
+            const depth=clamp((FX*rel.baseline)/par,.18,5.5);
+            const d=ray(m.a.x,m.a.y);
+            q={p:d.map(v=>v*depth),err:Math.min(.22,par/100)};
+          }
           const pw=mv(mt(oldPose.R),q.p.map((v,i)=>v-oldPose.t[i]));
-          const quality=clamp(.82-Math.min(.65,q.err/Math.max(.025,q.p[2]*.35)),.12,.9);
+          const quality=clamp(.72-Math.min(.45,q.err/Math.max(.05,q.p[2]*.6)),.18,.82);
           const tracker=stableAt(m.b.x,m.b.y); fuse(scan.map,pw,m.a.d,quality,q.err,tracker?.id||null);
-          const qq=project(pw,scan.pose);markCoverageFromPoint(pw,qq);markZone(qq);added++;
+          const qq=project(pw,scan.pose);markCoverageFromPoint(pw,qq);added++;
         }
         if(added>0){scan.keyframes++;scan.lastKey=now;scan.baseline=Math.max(scan.baseline,Math.hypot(...rel.t));scan.good+=added}
       }
@@ -279,8 +320,8 @@ function scannerLoop(){
       if(corr.length>=6){const rr=refinePose(scan.pose,corr);if(rr.error<30)scan.pose=rr.pose}
     }
     updateStableTracks(matches);scan.prev=g;scan.features=f;drawScan(f);
-    $('scanGuide').textContent=t<1.5?'QUIETO · FIJANDO REFERENCIAS':(canSave()?'MAPA LISTO':'EXPLORA EL ENTORNO');
-    $('scanHint').textContent=t<1.5?'Mantén el móvil quieto un instante para registrar referencias.':(f.length<10?'Busca textura, esquinas y objetos con detalle.':'Rojo=nunca visto · naranja=visto · amarillo=casi patrón · verde=grupo abstracto · azul=punto 3D final.');
+    $('scanGuide').textContent=t<1.5?'QUIETO · FIJANDO REFERENCIAS':(canSave()?'MAPA GENERAL LISTO':'ESCANEANDO ZONAS');
+    $('scanHint').textContent=t<1.5?'Mantén el móvil quieto un instante para registrar referencias.':(canSave()?'Ya tenemos una representación general; el detalle puede hacerse después.':'Gira lentamente para cubrir izquierda, centro y derecha. No hace falta caminar ni buscar cada detalle.');
   }catch(e){
     console.warn('BeyondHome scanner:',e);
     $('scanGuide').textContent='ESCÁNER ACTIVO';
@@ -307,7 +348,7 @@ async function startScanner(){
   }
 }
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-sfm-v28-bogon-zones',scale:'relative',version:28,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.45);const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-bogon-parallax-v29',scale:'relative',version:29,appVersion:APP_VERSION,coverage:readiness(),points:pts.length,secured:secured(),samples:pts,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${pts.length} puntos 3D relativos`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------
