@@ -1,19 +1,19 @@
 'use strict';
-// BeyondHome ALFA 0.13.6 — visual-only coarse spatial Bogon mapper with sparse adaptive geometry.
+// BeyondHome ALFA 0.13.7 — visual-only coarse spatial Bogon mapper with sparse adaptive geometry.
 // RGB is the only motion source. Device orientation/gyroscope/compass is intentionally disabled:
 // the spatial pose is estimated from visual references and optical motion only.
 // No depth sensor, ARCore or WebXR dependency is required.
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.13.6';
-const BUILD_ID='2026-08-16.13.6';
-const KEY='beyondHome.v36';
+const APP_VERSION='0.13.7';
+const BUILD_ID='2026-08-16.13.7';
+const KEY='beyondHome.v37';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v35')||localStorage.getItem('beyondHome.v34')||localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v36')||localStorage.getItem('beyondHome.v35')||localStorage.getItem('beyondHome.v34')||localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 // Aggressive client-cache cleanup for phone browsers. There is no service worker in this build;
 // nevertheless remove old registrations/caches and stamp the document with the current build.
 (async()=>{try{if('serviceWorker' in navigator){for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}if('caches' in window){for(const k of await caches.keys())await caches.delete(k)}document.documentElement.dataset.build=BUILD_ID;}catch(e){console.debug('cache cleanup',e)}})();
@@ -21,7 +21,9 @@ function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}c
 function activeSpace(){return db.spaces.find(s=>s.id===db.active)||null}
 function toast(m){const t=$('arToast'); if(t){t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}else console.log(m)}
 function show(id){stopScanner();if(id!=='arScreen')stopAR();if(id!=='cameraScreen'&&id!=='createScreen'&&id!=='arScreen')stopCamera();SCREENS.forEach(s=>$(s)?.classList.toggle('active',s===id));if(id==='spacesScreen')renderSpaces();if(id==='localScreen')renderLocal();if(id==='infoScreen')startInfo();else stopInfo();updateSupport()}
-$('enter').onclick=()=>show('home');
+window.__bhEnter=()=>show('home');
+const enterBtn=$('enter');
+if(enterBtn)enterBtn.onclick=window.__bhEnter;
 async function openCamera(video){
   if(!navigator.mediaDevices?.getUserMedia)throw Error('Este navegador no permite cámara. Usa Chrome/Edge con HTTPS.');
   if(!video)throw Error('Visor de cámara no encontrado.');
