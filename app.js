@@ -4,14 +4,14 @@
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.13.1';
-const BUILD_ID='2026-08-16.13.1';
-const KEY='beyondHome.v32';
+const APP_VERSION='0.13.3';
+const BUILD_ID='2026-08-16.13.3';
+const KEY='beyondHome.v33';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 // Old service workers/caches can keep a previous HTML/JS build on a phone. This build deliberately removes them.
 (async()=>{try{if('serviceWorker' in navigator){for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}if('caches' in window){for(const k of await caches.keys())await caches.delete(k)}}catch(e){console.debug('cache cleanup',e)}})();
 function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}catch{toast('No se pudo guardar el mapa.');return false}}
@@ -163,37 +163,72 @@ function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,pre
 function scanTime(){return scan.started?(performance.now()-scan.started)/1000:0}
 function secured(){return scan.bogonAnchors.size}
 function greenCount(){return scan.stable.filter(a=>a.hits>=4).length}
-function coarseBogonPosition(a){
-  const col=Math.min(2,Math.max(0,Math.floor(a.x/(SW/3)))), row=Math.min(1,Math.max(0,Math.floor(a.y/(SH/2))));
-  const localX=(a.x-((col+.5)*SW/3))/(SW/3);
-  const localY=(a.y-((row+.5)*SH/2))/(SH/2);
-  // Abstract room coordinates. They are deliberately not metric: the camera only supplies image evidence.
-  const x=(col-1)*0.85+localX*0.34;
-  const y=(.5-row)*0.48-localY*0.20;
-  const z=0.65+col*0.38+row*0.22;
-  return [x,y,z];
+function worldPointForTracker(a){
+  if(!a)return null;
+  // First choice: the tracker has already been fused into the spatial map.
+  const direct=spatialForTracker(a.id);
+  if(direct&&direct.n>=2)return [direct.x,direct.y,direct.z];
+
+  // Second choice: associate the green tracker with the closest projected 3D sample.
+  let best=null,bd=28;
+  for(const p of scan.map.values()){
+    if((p.n||0)<2)continue;
+    const q=project([p.x,p.y,p.z],scan.pose);if(!q)continue;
+    const d=Math.hypot(q.x-a.x,q.y-a.y);
+    if(d<bd){bd=d;best=p;}
+  }
+  if(best)return [best.x,best.y,best.z];
+
+  // Last-resort Bogon spatial hypothesis. It is still in the SAME world frame:
+  // camera centre + a camera ray transformed by the current pose. The depth is
+  // deliberately coarse; later observations can replace/fuse it.
+  const C=camCenter(scan.pose),d=mv(mt(scan.pose.R),ray(a.x,a.y));
+  const depth=clamp(0.75+1.15*(1-a.confidence),.55,1.9);
+  return C.map((v,i)=>v+d[i]*depth);
 }
 function buildBogonAnchors(){
   const greens=scan.stable.filter(a=>a.hits>=4&&a.confidence>=.45);
   const groups=new Map();
   for(const a of greens){const k=zoneKey(a.x,a.y);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(a)}
+
+  // Every blue Bogon anchor is now derived from WORLD positions, never from
+  // the 2D image grid. The image zone is only its label/coverage bucket.
   for(const [zone,arr] of groups){
     if(arr.length<2)continue;
-    // Cluster nearby green trackers. Two or more stable visual references create one coarse Bogon anchor.
     const used=new Set();
-    for(const seed of arr){if(used.has(seed.id))continue;const cluster=arr.filter(b=>!used.has(b.id)&&Math.hypot(b.x-seed.x,b.y-seed.y)<48);if(cluster.length<2)continue;
+    for(const seed of arr){
+      if(used.has(seed.id))continue;
+      const cluster=arr.filter(b=>!used.has(b.id)&&Math.hypot(b.x-seed.x,b.y-seed.y)<52);
+      if(cluster.length<2)continue;
       cluster.forEach(b=>used.add(b.id));
       const ids=cluster.map(b=>b.id).sort();
-      const id='bogon-'+zone+'-'+ids.slice(0,4).join('-');
-      const pos=[0,0,0];cluster.forEach(b=>{const q=coarseBogonPosition(b);for(let i=0;i<3;i++)pos[i]+=q[i]/cluster.length});
+      const positions=cluster.map(worldPointForTracker).filter(Boolean);
+      if(positions.length<2)continue;
+      const pos=[0,0,0];
+      positions.forEach(q=>{for(let i=0;i<3;i++)pos[i]+=q[i]/positions.length});
+      const spread=positions.length>1?positions.reduce((s,q)=>s+Math.hypot(q[0]-pos[0],q[1]-pos[1],q[2]-pos[2]),0)/positions.length:0;
+      const id='bogon-'+ids.slice(0,4).join('-');
       const old=scan.bogonAnchors.get(id);
-      scan.bogonAnchors.set(id,{id,x:pos[0],y:pos[1],z:pos[2],trackers:ids,zone,n:old?Math.min(255,old.n+1):1,confidence:Math.min(1,(old?.confidence||.35)+.10)});
+      const alpha=old?.n?0.22:1;
+      const fused=old?[old.x+(pos[0]-old.x)*alpha,old.y+(pos[1]-old.y)*alpha,old.z+(pos[2]-old.z)*alpha]:pos;
+      scan.bogonAnchors.set(id,{id,x:fused[0],y:fused[1],z:fused[2],trackers:ids,zone,n:old?Math.min(255,old.n+1):1,confidence:Math.min(1,(old?.confidence||.45)+.08),spread});
     }
   }
-  // Guarantee a coarse room skeleton once enough visual references exist in a zone. This is the Bogon map fallback:
-  // it does not pretend to know exact depth; it creates a stable abstract spatial sample from multiple camera trackers.
+
+  // Once there are enough green trackers, ensure sparse room coverage. These
+  // anchors are still world-space: no fake X/Z coordinates are generated from
+  // screen columns. This gives us a solid general room before detail scanning.
   if(greens.length>=8){
-    for(const a of greens.slice(0,18)){const zone=zoneKey(a.x,a.y),ids=greens.filter(b=>zoneKey(b.x,b.y)===zone).slice(0,3).map(b=>b.id);if(ids.length<2)continue;const id='surface-'+zone+'-'+Math.round(a.x/18)+'-'+Math.round(a.y/18);const q=coarseBogonPosition(a);const old=scan.bogonAnchors.get(id);scan.bogonAnchors.set(id,{id,x:q[0],y:q[1],z:q[2],trackers:ids,zone,n:(old?.n||0)+1,confidence:Math.min(1,(old?.confidence||.4)+.05)});}
+    for(const a of greens.slice(0,24)){
+      const ids=greens.filter(b=>Math.hypot(b.x-a.x,b.y-a.y)<70).slice(0,4).map(b=>b.id).sort();
+      if(ids.length<2)continue;
+      const positions=ids.map(id=>worldPointForTracker(scan.stable.find(b=>b.id===id))).filter(Boolean);
+      if(positions.length<2)continue;
+      const pos=[0,0,0];positions.forEach(q=>{for(let i=0;i<3;i++)pos[i]+=q[i]/positions.length});
+      const id='surface-'+ids.slice(0,3).join('-');
+      const old=scan.bogonAnchors.get(id);
+      scan.bogonAnchors.set(id,{id,x:pos[0],y:pos[1],z:pos[2],trackers:ids,zone:zoneKey(a.x,a.y),n:(old?.n||0)+1,confidence:Math.min(1,(old?.confidence||.48)+.04),spread:old?.spread||0});
+    }
   }
 }
 function zoneKey(x,y){return Math.min(2,Math.max(0,Math.floor(x/(SW/3))))+','+Math.min(1,Math.max(0,Math.floor(y/(SH/2))));}
@@ -391,7 +426,7 @@ async function startScanner(){
   }
 }
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>({x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:.12,bogon:true}));const samples=[...pts,...anchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-bogon-coarse-v13',scale:'abstract-relative',version:31,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,bogon:true,anchorId:a.id,zone:a.zone};});const samples=[...pts,...anchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-bogon-coarse-v13',scale:'abstract-relative',version:33,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------
@@ -442,16 +477,24 @@ function arRender(){
     x.strokeStyle='#fff';x.lineWidth=1.5;x.beginPath();x.arc(q.x,q.y,pulse,0,Math.PI*2);x.stroke();
     x.fillStyle='#fff';x.font='700 9px system-ui';x.fillText('ENFOCA AQUÍ',q.x+10,q.y-8);
   }
+  // The saved room itself is made of coarse Bogon cubes. They are NOT screen-space
+  // decorations: their anchors are the world-space coordinates created during scan.
+  if(ar.showMap && s){
+    const roomBogons=(s.samples||[]).filter(p=>p.bogon);
+    for(const p of roomBogons){
+      drawBogon(x,w,h,{anchor:{x:p.x,y:p.y,z:p.z},size:Math.max(.10,Math.min(.34,(p.spread||.18)*1.8)),spacing:.035,mode:'surface',foveated:false,rx:0,ry:0,rz:0},ar.pose);
+    }
+  }
   if(ar.showObjects)for(const o of ar.objects)drawBogon(x,w,h,o,ar.pose);
   if(ar.preview)drawBogon(x,w,h,ar.preview,ar.pose);
-  $('cloudCount').textContent=`${ar.objects.length} BOGONES · ${locks.length} REFERENCIAS 3D · ${features.length} MARCAS`;
+  const roomBogonCount=s?(s.samples||[]).filter(p=>p.bogon).length:0; $('cloudCount').textContent=`${roomBogonCount} BOGONES DE MAPA · ${ar.objects.length} OBJETOS · ${locks.length} REFERENCIAS 3D`;
   ar.raf=requestAnimationFrame(arLoop);
 }
 function arLoop(){if(!ar.running)return;const now=performance.now();if(now-ar.last<90){ar.raf=requestAnimationFrame(arLoop);return}ar.last=now;const g=arFrame(),s=activeSpace();if(g&&s){const f=detect(g),locks=matchMap(f,s);ar.locks=locks;if(locks.length>=6){const corr=locks.slice(0,30).map(a=>({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y}));const rr=refinePose(ar.pose,corr);if(rr.error<25)ar.pose=rr.pose}$('track').textContent=locks.length>=10?'● MAPA RECONOCIDO':locks.length>=4?'● REFERENCIAS 3D':'○ BUSCANDO TEXTURA';
     $('reticleText').textContent=locks.length>=10?'Punto verde = referencia 3D reconocida':f.length?'Enfoca esquinas, bordes o textura visible':'Busca una zona con detalle';
     $('arToast').textContent=locks.length>=10?'Mapa reconocido · mantén el teléfono estable':'Apunta a una esquina, borde o textura y muévete lentamente';
     ar.features=f;ar.prev=g}arRender()}
-async function startAR(){const s=activeSpace();if(!s){toast('Primero crea un espacio');show('createScreen');return}SCREENS.forEach(id=>$(id)?.classList.toggle('active',id==='arScreen'));try{await openCamera($('arCamera'))}catch(e){toast(e.message);return}ar.running=true;ar.pose={R:I3(),t:[0,0,0]};ar.objects=(s.objects||[]).map(o=>({...o}));ar.preview=null;ar.locks=[];ar.last=0;$('arSpaceName').textContent=s.name.toUpperCase();$('arToast').textContent='Sólo cámara · busca el espacio guardado';arLoop()}
+async function startAR(){const s=activeSpace();if(!s){toast('Primero crea un espacio');show('createScreen');return}SCREENS.forEach(id=>$(id)?.classList.toggle('active',id==='arScreen'));try{await openCamera($('arCamera'))}catch(e){toast(e.message);return}ar.running=true;ar.pose={R:I3(),t:[0,0,0]};ar.objects=(s.objects||[]).map(o=>({...o}));ar.preview=null;ar.locks=[];ar.last=0;$('arSpaceName').textContent=s.name.toUpperCase();$('arToast').textContent='Mapa Bogon cargado · busca las referencias verdes para alinear el entorno';arLoop()}
 function stopAR(){ar.running=false;cancelAnimationFrame(ar.raf);ar.preview=null;ar.locks=[]}
 function placeAt(x,y){if(!ar.edit)return toast('Modo visualización: no se puede crear.');const s=activeSpace(),arr=s?.samples||[];let best=null,bd=999;for(const p of arr){if(p.n<3||p.confidence<.58)continue;const q=project([p.x,p.y,p.z],ar.pose);if(!q)continue;const d=Math.hypot(q.x-x*SW,q.y-y*SH);if(d<bd){bd=d;best=p}}if(!best||bd>30)return toast('Apunta a un punto verde consolidado.');ar.preview={anchor:{x:best.x,y:best.y,z:best.z},size:ar.size,spacing:ar.spacing,mode:ar.mode,foveated:ar.foveated};$('confirmPos').textContent=`Anclaje 3D · ${best.n} observaciones`;$('confirm').classList.remove('hidden')}
 $('enterAR').onclick=startAR;$('placeAction').onclick=()=>placeAt(SW/2,SH/2);$('arCanvas').addEventListener('pointerup',e=>{if(ar.running&&!e.target.closest?.('.arUI'))placeAt(e.clientX/innerWidth,e.clientY/innerHeight)});$('place').onclick=()=>{if(!ar.preview)return;ar.objects.push({...ar.preview});ar.preview=null;$('confirm').classList.add('hidden');const s=activeSpace();s.objects=ar.objects;saveDB();toast('Bogon 3D guardado')};$('cancelPlace').onclick=()=>{$('confirm').classList.add('hidden');ar.preview=null};$('exitXR').onclick=()=>{stopAR();stopCamera();show('simScreen')};$('arExit').onclick=()=>$('exitXR').click();$('arSave').onclick=()=>{const s=activeSpace();if(s){s.objects=ar.objects;saveDB();toast('Estado guardado')}};$('arMenu').onclick=()=>$('arMenuPanel').classList.toggle('hidden');$('closeArMenu').onclick=()=>$('arMenuPanel').classList.add('hidden');$('arMapToggle').onclick=()=>{ar.showMap=!ar.showMap;$('geo').innerHTML=`MAPA <b>${ar.showMap?'ON':'OFF'}</b>`};$('geo').onclick=()=>$('arMapToggle').click();$('objects').onclick=()=>{ar.showObjects=!ar.showObjects;$('objects').innerHTML=`OBJETOS <b>${ar.showObjects?'ON':'OFF'}</b>`};$('clear').onclick=()=>{ar.objects=[];const s=activeSpace();if(s){s.objects=[];saveDB()}toast('Bogones eliminados')};$('size').oninput=e=>{ar.size=+e.target.value/100;$('sizeText').textContent=e.target.value+' cm'};$('detail').oninput=e=>{ar.spacing=+e.target.value/100;$('detailText').textContent=e.target.value+' cm'};['edge','surface','volume'].forEach(id=>$(id).onclick=()=>{ar.mode=id;document.querySelectorAll('#edge,#surface,#volume').forEach(b=>b.classList.remove('selected'));$(id).classList.add('selected')});$('foveated').onclick=()=>{ar.foveated=!ar.foveated;$('foveated').classList.toggle('selected',ar.foveated)};$('deleteNearest').onclick=()=>{if(ar.objects.length){ar.objects.pop();const s=activeSpace();if(s){s.objects=ar.objects;saveDB()}}};$('arLab').onclick=()=>show('infoScreen');$('closeLab').onclick=()=>show('arScreen');
