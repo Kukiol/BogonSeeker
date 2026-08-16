@@ -1,40 +1,12 @@
-BeyondHome ALFA 0.13 — Bogon Zones / Tracker Lock
+BeyondHome ALFA 0.13.1 — General Room / Bogon Map
 
-CAMERA ONLY. No GPS, depth sensor, IMU, ARCore, WebXR or external libraries.
+FIX 0.13.1:
+- El visor de escaneo usa la cámara RGB como capa base sin ninguna capa negra opaca.
+- El canvas de tracking es transparente y sólo dibuja trackers/malla.
+- Se fuerza z-index, visibilidad, opacidad y background transparente del vídeo/canvas.
+- Nueva versión/cache-busting: 0.13.1.
+- Nueva clave local v32 para evitar reutilizar estado incompatible.
 
-Changes from 0.08:
-- Scanner now works by 3 spatial screen zones (3x2 grid), not by requiring large movement.
-- A small lateral micro-displacement is enough to create parallax evidence.
-- Triangulation accepts a wider but still bounded reprojection geometry, allowing cyan 3D samples to appear on ordinary RGB cameras.
-- Green points are visual tracking only.
-- CYAN points are consolidated 3D samples.
-- Progress is based on actual 3D zones + samples rather than raw coverage cells.
-- Save requires 3 of 6 zones, 12+ 3D samples, 3 consolidated samples and 2 keyframes.
-- App version/cache-busting updated to 0.12; Netlify no-cache headers retained.
-
-Recommended use:
-1. Hold the phone still for about 1 second.
-2. Aim at a textured area (books, furniture, frame, edge).
-3. Move the phone sideways a few centimetres without rotating much.
-4. Wait for cyan points.
-5. Move to another screen zone and repeat. Three zones are enough to save.
-
-
-ALFA 0.13: ciclo visual de referencias RED/ORANGE/YELLOW/GREEN/BLUE. El azul representa puntos triangulados que entran en la malla Bogon; no se exige precisión métrica absoluta.
-
-
-ALFA 0.13 — MODO MAPA GENERAL
-- El escaneo prioriza cobertura por zonas y forma general de la habitación, no detalle fotogramétrico.
-- El azul es un anclaje espacial Bogon provisional: varios trackers han contribuido a fijarlo y podrá refinarse posteriormente.
-- El usuario no necesita caminar por la habitación: basta con cubrir visualmente izquierda/centro/derecha con pequeños giros y desplazamientos suaves.
-- El detalle fino queda reservado para un modo avanzado posterior.
-
-
-ALFA 0.13 — MAPA GENERAL SOLIDO
-- El azul ya no depende de conseguir una triangulación fotogramétrica perfecta.
-- Dos o más trackers verdes estables dentro de una zona generan un anclaje Bogon azul.
-- Los anclajes usan coordenadas abstractas relativas: priorizan continuidad y solidez del entorno sobre precisión métrica.
-- El usuario puede permanecer prácticamente en el sitio y girar suavemente para cubrir izquierda, centro y derecha.
-- El mapa se puede guardar cuando existen al menos 2 zonas y 4 anclajes azules.
-- Los puntos azules se consideran parte de la malla Bogon general y el detalle puede refinarse posteriormente.
-- Se incrementa la versión de almacenamiento y se limpia cualquier Service Worker/Cache Storage antiguo al arrancar.
+Cámara:
+- RGB normal del teléfono.
+- Sin LiDAR, profundidad, IMU, ARCore, WebXR ni sensores externos.

@@ -4,9 +4,9 @@
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.13';
-const BUILD_ID='2026-08-15.13';
-const KEY='beyondHome.v31';
+const APP_VERSION='0.13.1';
+const BUILD_ID='2026-08-16.13.1';
+const KEY='beyondHome.v32';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
