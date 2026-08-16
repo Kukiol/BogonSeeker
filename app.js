@@ -1,17 +1,18 @@
 'use strict';
-// BeyondHome ALFA 0.13 — camera-only monocular spatial mapper.
-// No GPS is used by the mapper. No depth sensor, IMU, ARCore, WebXR or external libraries.
+// BeyondHome ALFA 0.13.4 — monocular Bogon spatial mapper with optional device orientation.
+// RGB remains the primary source. Gyroscope/compass orientation is used when the browser exposes it;
+// visual references remain the fallback. No depth sensor or ARCore/WebXR dependency is required.
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.13.3';
-const BUILD_ID='2026-08-16.13.3';
-const KEY='beyondHome.v33';
+const APP_VERSION='0.13.4';
+const BUILD_ID='2026-08-16.13.4';
+const KEY='beyondHome.v34';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 // Old service workers/caches can keep a previous HTML/JS build on a phone. This build deliberately removes them.
 (async()=>{try{if('serviceWorker' in navigator){for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}if('caches' in window){for(const k of await caches.keys())await caches.delete(k)}}catch(e){console.debug('cache cleanup',e)}})();
 function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}catch{toast('No se pudo guardar el mapa.');return false}}
@@ -154,6 +155,24 @@ function estimateRelative(ms){
   const baseline=clamp(.018+f.mag/1400,.018,.065);
   return{R:compose(pitch,yaw,0),t:v.map(x=>x*baseline),flow:f,sim:s,baseline};
 }
+function relativeDepthForMatch(m,rel){
+  // Coarse monocular depth: remove the dominant image similarity and interpret the
+  // remaining parallax as translation-induced motion. Absolute metres are not claimed;
+  // the value only needs to preserve near/far ordering for the Bogon map.
+  const ax=m.a.x-CX,ay=m.a.y-CY,bx=m.b.x-CX,by=m.b.y-CY;
+  const c=rel.sim,ca=Math.cos(c.ang),sa=Math.sin(c.ang);
+  const px=c.scale*(ca*ax-sa*ay),py=c.scale*(sa*ax+ca*ay);
+  const predX=px+c.dx,predY=py+c.dy;
+  const par=Math.hypot((bx-predX),(by-predY));
+  const depth=clamp((FX*Math.max(rel.baseline,.012))/Math.max(par,1.2),.28,6.5);
+  return {depth,parallax:par};
+}
+function fallbackSpatialPoint(m,rel){
+  const z=relativeDepthForMatch(m,rel).depth;
+  const d=ray(m.a.x,m.a.y);
+  return {p:d.map(v=>v*z),err:Math.max(.06,z*.16),depth:z};
+}
+
 function poseError(pose,corr){let e=0,n=0;for(const c of corr){const q=project(c.p,pose);if(!q)continue;const d=Math.hypot(q.x-c.x,q.y-c.y);if(d<35){e+=d;n++}}return n?e/n:999}
 function refinePose(pose,corr){if(corr.length<6)return{pose,error:999};let cur={R:pose.R.map(r=>r.slice()),t:[...pose.t]};for(let it=0;it<3;it++){const H=Array.from({length:6},()=>Array(6).fill(0)),g=Array(6).fill(0);let used=0;for(const c of corr){const q=project(c.p,cur);if(!q)continue;const rx=c.x-q.x,ry=c.y-q.y;if(Math.hypot(rx,ry)>40)continue;const J=[];for(let k=0;k<6;k++){const pp={R:cur.R.map(r=>r.slice()),t:[...cur.t]},eps=k<3?.004:.003;if(k<3)pp.t[k]+=eps;else pp.R=mul3(compose(k===3?eps:0,k===4?eps:0,k===5?eps:0),pp.R);const qq=project(c.p,pp);J.push(qq?[(qq.x-q.x)/eps,(qq.y-q.y)/eps]:[0,0])}for(let a=0;a<6;a++){g[a]+=J[a][0]*rx+J[a][1]*ry;for(let b=0;b<6;b++)H[a][b]+=J[a][0]*J[b][0]+J[a][1]*J[b][1]}used++}const d=solve(H.map((r,i)=>r.map((v,j)=>v+(i===j?.002:0))),g);if(!d||used<6)break;cur.t=cur.t.map((v,i)=>v+d[i]);cur.R=mul3(compose(d[3],d[4],d[5]),cur.R)}return{pose:cur,error:poseError(cur,corr)}}
 function matchDescriptors(features,map){const arr=[...map.values()].filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24)out.push({f,p:best,e:be})}return out}
@@ -183,7 +202,7 @@ function worldPointForTracker(a){
   // camera centre + a camera ray transformed by the current pose. The depth is
   // deliberately coarse; later observations can replace/fuse it.
   const C=camCenter(scan.pose),d=mv(mt(scan.pose.R),ray(a.x,a.y));
-  const depth=clamp(0.75+1.15*(1-a.confidence),.55,1.9);
+  const depth=clamp(a.depth||(.75+1.15*(1-a.confidence)),.35,6.5);
   return C.map((v,i)=>v+d[i]*depth);
 }
 function buildBogonAnchors(){
@@ -426,7 +445,7 @@ async function startScanner(){
   }
 }
 function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,bogon:true,anchorId:a.id,zone:a.zone};});const samples=[...pts,...anchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-only-monocular-bogon-coarse-v13',scale:'abstract-relative',version:33,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,depth:Math.max(.28,...a.trackers.map(id=>scan.stable.find(t=>t.id===id)?.depth||0)),bogon:true,anchorId:a.id,zone:a.zone};});const samples=[...pts,...anchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-monocular-bogon-coarse-v14-orientation-depth',scale:'abstract-relative',version:34,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------
@@ -439,14 +458,89 @@ $('mapReset').onclick=()=>{mapView={yaw:.5,pitch:-.35,zoom:1};renderLocal()};let
 let infoRAF=0;function stopInfo(){cancelAnimationFrame(infoRAF)}function startInfo(){stopInfo();const c=$('bogonExplain'),d=devicePixelRatio||1;const f=t=>{const w=c.clientWidth||340,h=c.clientHeight||260;c.width=w*d;c.height=h*d;const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);const ph=(t%9000)/9000;const n=Math.floor(20+ph*600),cx=w/2,cy=h*.48,s=Math.min(w,h)*.24;for(let i=0;i<n;i++){const a=i/n*Math.PI*2*3.8,r=s*(.25+.75*i/n),xx=cx+Math.cos(a)*r,yy=cy+Math.sin(a)*r*.65;x.fillStyle=i/n>.7?'#ff5ea8':i/n>.4?'#a35cff':'#71e8ff';x.fillRect(xx,yy,1.4,1.4)}x.fillStyle='#fff';x.font='800 11px system-ui';x.fillText(ph<.33?'UNA FUNCIÓN':ph<.66?'MUESTRAS': 'DETALLE ADAPTATIVO',14,h-16);infoRAF=requestAnimationFrame(f)};infoRAF=requestAnimationFrame(f)}
 $('bogonLab').onclick=()=>show('infoScreen');$('lab').onclick=()=>show('infoScreen');
 
+// ---------- Optional device orientation / compass ----------
+const imu={supported:false,active:false,absolute:false,permission:false,initial:null,current:null,heading:null,screen:0,handler:null,screenHandler:null};
+function angleDelta(a,b){let d=(a-b+540)%360-180;return d}
+function orientationSample(e){
+  const heading=Number.isFinite(e.webkitCompassHeading)?e.webkitCompassHeading:(Number.isFinite(e.alpha)?e.alpha:null);
+  const sample={alpha:Number.isFinite(e.alpha)?e.alpha:0,beta:Number.isFinite(e.beta)?e.beta:0,gamma:Number.isFinite(e.gamma)?e.gamma:0,heading};
+  imu.current=sample;if(sample.heading!=null)imu.heading=sample.heading;
+}
+function screenAngle(){return Number((screen.orientation?.angle ?? window.orientation ?? 0))||0}
+function orientationDelta(){
+  if(!imu.initial||!imu.current)return null;
+  const a=imu.initial,b=imu.current;
+  const yaw=a.heading!=null&&b.heading!=null?angleDelta(b.heading,a.heading):angleDelta(b.alpha,a.alpha);
+  const pitch=b.beta-a.beta;
+  const roll=b.gamma-a.gamma;
+  return {yaw,pitch,roll};
+}
+function sensorRotation(){
+  const d=orientationDelta();if(!d)return null;
+  // Pose is world -> camera, therefore the camera's measured orientation is inverted.
+  return compose(-d.pitch*Math.PI/180,-d.yaw*Math.PI/180,-d.roll*Math.PI/180);
+}
+async function startOrientationSensors(){
+  imu.supported=('DeviceOrientationEvent' in window);
+  if(!imu.supported)return false;
+  try{
+    if(typeof DeviceOrientationEvent.requestPermission==='function'){
+      const p=await DeviceOrientationEvent.requestPermission();imu.permission=p==='granted';if(!imu.permission)return false;
+    }else imu.permission=true;
+  }catch(e){imu.permission=false;return false}
+  if(imu.handler){window.removeEventListener('deviceorientationabsolute',imu.handler,true);window.removeEventListener('deviceorientation',imu.handler,true)}
+  if(imu.screenHandler)window.removeEventListener('orientationchange',imu.screenHandler,true);
+  imu.handler=e=>orientationSample(e);imu.screenHandler=()=>{imu.screen=screenAngle()};
+  window.addEventListener('deviceorientationabsolute',imu.handler,true);
+  window.addEventListener('deviceorientation',imu.handler,true);
+  window.addEventListener('orientationchange',imu.screenHandler,true);
+  imu.active=true;imu.absolute=('ondeviceorientationabsolute' in window);imu.screen=screenAngle();
+  await new Promise(r=>setTimeout(r,180));
+  imu.initial=imu.current?{...imu.current}:null;
+  return !!imu.initial;
+}
+function stopOrientationSensors(){
+  if(imu.handler){window.removeEventListener('deviceorientationabsolute',imu.handler,true);window.removeEventListener('deviceorientation',imu.handler,true)}
+  if(imu.screenHandler)window.removeEventListener('orientationchange',imu.screenHandler,true);
+  imu.active=false;imu.initial=null;imu.current=null;imu.heading=null;
+}
+function sensorInfo(){return imu.active?'IMU ✓':'IMU visual'}
+
 // ---------- AR ----------
 const ar={running:false,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},objects:[],preview:null,showMap:true,showObjects:true,edit:true,size:.12,spacing:.02,mode:'surface',foveated:true,raf:0,last:0};
 const arWork=document.createElement('canvas'),arCtx=arWork.getContext('2d',{willReadFrequently:true});
 function arFrame(){const v=$('arCamera');if(!v||v.readyState<2)return null;arWork.width=SW;arWork.height=SH;arCtx.drawImage(v,0,0,SW,SH);const d=arCtx.getImageData(0,0,SW,SH).data,g=new Uint8Array(SW*SH);for(let i=0,j=0;i<d.length;i+=4,j++)g[j]=(77*d[i]+150*d[i+1]+29*d[i+2])>>8;return g}
 function matchMap(features,s){const arr=(s?.samples||[]).filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24){const q=project([best.x,best.y,best.z],ar.pose);if(q&&Math.hypot(q.x-f.x,q.y-f.y)<38)out.push({f,p:best})}}return out}
 function bogonPoints(o){const n=clamp(Math.round((o.size||.12)/(o.spacing||.02)),3,28),h=(o.size||.12)/2,pts=[];if(o.mode==='edge'){for(let i=0;i<n;i++){const a=-h+2*h*i/(n-1);pts.push([a,-h,-h],[a,h,-h],[a,-h,h],[a,h,h])}}else{for(let face=0;face<6;face++)for(let j=0;j<n;j++)for(let i=0;i<n;i++){const a=-h+2*h*i/(n-1),b=-h+2*h*j/(n-1);pts.push(face===0?[a,b,-h]:face===1?[a,b,h]:face===2?[-h,a,b]:face===3?[h,a,b]:face===4?[a,-h,b]:[a,h,b])}}return pts}
-function drawBogon(x,w,h,o,pose){const a=o.anchor,c=project([a.x,a.y,a.z],pose);if(!c)return;const R=compose(o.rx||0,o.ry||0,o.rz||0),pts=[];for(const p of bogonPoints(o)){const q=mv(R,p),s=project([a.x+q[0],a.y+q[1],a.z+q[2]],pose);if(s)pts.push(s)}for(const p of pts){if(p.x<0||p.y<0||p.x>SW||p.y>SH)continue;const near=clamp(1-(p.z-c.z)/(o.size||.12),0,1);x.fillStyle=o.foveated?(near>.66?'#ff5ea8':near>.33?'#a35cff':'#71e8ff'):'#71e8ff';x.fillRect(p.x/SW*w-1,p.y/SH*h-1,2,2)}const h3=(o.size||.12)/2,verts=[[-h3,-h3,-h3],[h3,-h3,-h3],[h3,h3,-h3],[-h3,h3,-h3],[-h3,-h3,h3],[h3,-h3,h3],[h3,h3,h3],[-h3,h3,h3]],edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]],vp=verts.map(p=>{const q=mv(R,p);return project([a.x+q[0],a.y+q[1],a.z+q[2]],pose)});x.strokeStyle='#71e8ff';x.lineWidth=1;for(const [i,j] of edges){const p=vp[i],q=vp[j];if(p&&q){x.beginPath();x.moveTo(p.x/SW*w,p.y/SH*h);x.lineTo(q.x/SW*w,q.y/SH*h);x.stroke()}}}
+function drawBogon(x,w,h,o,pose){const a=o.anchor,c=project([a.x,a.y,a.z],pose);if(!c)return;const worldSize=o.size||.12;const size=depthVisualScale(c.z,worldSize);const R=compose(o.rx||0,o.ry||0,o.rz||0),pts=[];for(const p of bogonPoints({...o,size})){const q=mv(R,p),s=project([a.x+q[0],a.y+q[1],a.z+q[2]],pose);if(s)pts.push(s)}for(const p of pts){if(p.x<0||p.y<0||p.x>SW||p.y>SH)continue;const near=clamp(1-(p.z-c.z)/(o.size||.12),0,1);x.fillStyle=o.foveated?(near>.66?'#ff5ea8':near>.33?'#a35cff':'#71e8ff'):'#71e8ff';x.fillRect(p.x/SW*w-1,p.y/SH*h-1,2,2)}const h3=size/2,verts=[[-h3,-h3,-h3],[h3,-h3,-h3],[h3,h3,-h3],[-h3,h3,-h3],[-h3,-h3,h3],[h3,-h3,h3],[h3,h3,h3],[-h3,h3,h3]],edges=[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]],vp=verts.map(p=>{const q=mv(R,p);return project([a.x+q[0],a.y+q[1],a.z+q[2]],pose)});x.strokeStyle='#71e8ff';x.lineWidth=1;for(const [i,j] of edges){const p=vp[i],q=vp[j];if(p&&q){x.beginPath();x.moveTo(p.x/SW*w,p.y/SH*h);x.lineTo(q.x/SW*w,q.y/SH*h);x.stroke()}}}
 function cameraToScreen(px,py,w,h){const scale=Math.max(w/SW,h/SH),dw=SW*scale,dh=SH*scale;return{x:(w-dw)/2+px*scale,y:(h-dh)/2+py*scale}}
+function applySensorPose(){
+  const sr=sensorRotation();
+  if(!sr)return;
+  // Keep the translation solved visually, while using the phone's orientation as a strong
+  // rotation prior. This stops a placed Bogon from behaving like a HUD sticker when the user turns.
+  ar.pose.R=sr;
+}
+function visualTranslationFromLocks(locks){
+  if(locks.length<4)return;
+  // Solve a small translation correction from reprojection residuals with the current rotation.
+  // This is deliberately damped: it gives the map a stable spatial drift model without pretending
+  // that monocular RGB provides metric SLAM.
+  let A=[],B=[];
+  for(const l of locks.slice(0,24)){
+    const p=transform(ar.pose,l.p);if(p[2]<=.05)continue;
+    const u=FX*p[0]/p[2]+CX,v=FY*p[1]/p[2]+CY,rx=l.f.x-u,ry=l.f.y-v;
+    const z=Math.max(.25,Math.min(6.5,p[2]));
+    A.push([-FX/z,0,FX*p[0]/(z*z),0,-FY/z,FY*p[1]/(z*z)]);
+    B.push(rx,ry);
+  }
+  if(A.length<4)return;
+  const H=Array.from({length:3},()=>Array(3).fill(0)),g=Array(3).fill(0);
+  for(let i=0;i<A.length;i+=2){const ax=A[i],ay=A[i+1],bx=B[i],by=B[i+1];for(let j=0;j<3;j++){g[j]+=ax[j]*bx+ay[j]*by;for(let k=0;k<3;k++)H[j][k]+=ax[j]*ax[k]+ay[j]*ay[k]}}
+  const d=solve(H.map((r,i)=>r.map((v,j)=>v+(i===j?.02:0))),g);if(d){for(let i=0;i<3;i++)ar.pose.t[i]+=clamp(d[i],-.035,.035)*.45}
+}
+function depthVisualScale(z,size){return clamp(size*(1.8/Math.max(.25,z)),.045,size*2.8)}
+
 function arRender(){
   if(!ar.running)return;
   const c=$('arCanvas'),d=devicePixelRatio||1,w=innerWidth,h=innerHeight;
@@ -487,18 +581,18 @@ function arRender(){
   }
   if(ar.showObjects)for(const o of ar.objects)drawBogon(x,w,h,o,ar.pose);
   if(ar.preview)drawBogon(x,w,h,ar.preview,ar.pose);
-  const roomBogonCount=s?(s.samples||[]).filter(p=>p.bogon).length:0; $('cloudCount').textContent=`${roomBogonCount} BOGONES DE MAPA · ${ar.objects.length} OBJETOS · ${locks.length} REFERENCIAS 3D`;
+  const roomBogonCount=s?(s.samples||[]).filter(p=>p.bogon).length:0; $('cloudCount').textContent=`${roomBogonCount} BOGONES DE MAPA · ${ar.objects.length} OBJETOS · ${locks.length} REFERENCIAS 3D · ${sensorInfo()}`;
   ar.raf=requestAnimationFrame(arLoop);
 }
-function arLoop(){if(!ar.running)return;const now=performance.now();if(now-ar.last<90){ar.raf=requestAnimationFrame(arLoop);return}ar.last=now;const g=arFrame(),s=activeSpace();if(g&&s){const f=detect(g),locks=matchMap(f,s);ar.locks=locks;if(locks.length>=6){const corr=locks.slice(0,30).map(a=>({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y}));const rr=refinePose(ar.pose,corr);if(rr.error<25)ar.pose=rr.pose}$('track').textContent=locks.length>=10?'● MAPA RECONOCIDO':locks.length>=4?'● REFERENCIAS 3D':'○ BUSCANDO TEXTURA';
+function arLoop(){if(!ar.running)return;const now=performance.now();if(now-ar.last<70){ar.raf=requestAnimationFrame(arLoop);return}ar.last=now;const g=arFrame(),s=activeSpace();if(g&&s){applySensorPose();const f=detect(g),locks=matchMap(f,s);ar.locks=locks;if(locks.length>=4){visualTranslationFromLocks(locks)}if(locks.length>=6){const corr=locks.slice(0,30).map(a=>({p:[a.p.x,a.p.y,a.p.z],x:a.f.x,y:a.f.y}));const rr=refinePose(ar.pose,corr);if(rr.error<28){ar.pose=rr.pose}}$('track').textContent=locks.length>=10?'● MAPA RECONOCIDO':locks.length>=4?'● REFERENCIAS 3D':'○ BUSCANDO TEXTURA';
     $('reticleText').textContent=locks.length>=10?'Punto verde = referencia 3D reconocida':f.length?'Enfoca esquinas, bordes o textura visible':'Busca una zona con detalle';
     $('arToast').textContent=locks.length>=10?'Mapa reconocido · mantén el teléfono estable':'Apunta a una esquina, borde o textura y muévete lentamente';
     ar.features=f;ar.prev=g}arRender()}
-async function startAR(){const s=activeSpace();if(!s){toast('Primero crea un espacio');show('createScreen');return}SCREENS.forEach(id=>$(id)?.classList.toggle('active',id==='arScreen'));try{await openCamera($('arCamera'))}catch(e){toast(e.message);return}ar.running=true;ar.pose={R:I3(),t:[0,0,0]};ar.objects=(s.objects||[]).map(o=>({...o}));ar.preview=null;ar.locks=[];ar.last=0;$('arSpaceName').textContent=s.name.toUpperCase();$('arToast').textContent='Mapa Bogon cargado · busca las referencias verdes para alinear el entorno';arLoop()}
-function stopAR(){ar.running=false;cancelAnimationFrame(ar.raf);ar.preview=null;ar.locks=[]}
+async function startAR(){const s=activeSpace();if(!s){toast('Primero crea un espacio');show('createScreen');return}SCREENS.forEach(id=>$(id)?.classList.toggle('active',id==='arScreen'));try{await openCamera($('arCamera'))}catch(e){toast(e.message);return}ar.running=true;ar.pose={R:I3(),t:[0,0,0]};ar.objects=(s.objects||[]).map(o=>({...o}));ar.preview=null;ar.locks=[];ar.last=0;await startOrientationSensors();$('arSpaceName').textContent=s.name.toUpperCase();$('arToast').textContent=imu.active?'Mapa cargado · orientación del teléfono activa · busca referencias para fijar posición':'Mapa cargado · tracking visual · busca referencias para fijar posición';arLoop()}
+function stopAR(){ar.running=false;cancelAnimationFrame(ar.raf);ar.preview=null;ar.locks=[];stopOrientationSensors()}
 function placeAt(x,y){if(!ar.edit)return toast('Modo visualización: no se puede crear.');const s=activeSpace(),arr=s?.samples||[];let best=null,bd=999;for(const p of arr){if(p.n<3||p.confidence<.58)continue;const q=project([p.x,p.y,p.z],ar.pose);if(!q)continue;const d=Math.hypot(q.x-x*SW,q.y-y*SH);if(d<bd){bd=d;best=p}}if(!best||bd>30)return toast('Apunta a un punto verde consolidado.');ar.preview={anchor:{x:best.x,y:best.y,z:best.z},size:ar.size,spacing:ar.spacing,mode:ar.mode,foveated:ar.foveated};$('confirmPos').textContent=`Anclaje 3D · ${best.n} observaciones`;$('confirm').classList.remove('hidden')}
 $('enterAR').onclick=startAR;$('placeAction').onclick=()=>placeAt(SW/2,SH/2);$('arCanvas').addEventListener('pointerup',e=>{if(ar.running&&!e.target.closest?.('.arUI'))placeAt(e.clientX/innerWidth,e.clientY/innerHeight)});$('place').onclick=()=>{if(!ar.preview)return;ar.objects.push({...ar.preview});ar.preview=null;$('confirm').classList.add('hidden');const s=activeSpace();s.objects=ar.objects;saveDB();toast('Bogon 3D guardado')};$('cancelPlace').onclick=()=>{$('confirm').classList.add('hidden');ar.preview=null};$('exitXR').onclick=()=>{stopAR();stopCamera();show('simScreen')};$('arExit').onclick=()=>$('exitXR').click();$('arSave').onclick=()=>{const s=activeSpace();if(s){s.objects=ar.objects;saveDB();toast('Estado guardado')}};$('arMenu').onclick=()=>$('arMenuPanel').classList.toggle('hidden');$('closeArMenu').onclick=()=>$('arMenuPanel').classList.add('hidden');$('arMapToggle').onclick=()=>{ar.showMap=!ar.showMap;$('geo').innerHTML=`MAPA <b>${ar.showMap?'ON':'OFF'}</b>`};$('geo').onclick=()=>$('arMapToggle').click();$('objects').onclick=()=>{ar.showObjects=!ar.showObjects;$('objects').innerHTML=`OBJETOS <b>${ar.showObjects?'ON':'OFF'}</b>`};$('clear').onclick=()=>{ar.objects=[];const s=activeSpace();if(s){s.objects=[];saveDB()}toast('Bogones eliminados')};$('size').oninput=e=>{ar.size=+e.target.value/100;$('sizeText').textContent=e.target.value+' cm'};$('detail').oninput=e=>{ar.spacing=+e.target.value/100;$('detailText').textContent=e.target.value+' cm'};['edge','surface','volume'].forEach(id=>$(id).onclick=()=>{ar.mode=id;document.querySelectorAll('#edge,#surface,#volume').forEach(b=>b.classList.remove('selected'));$(id).classList.add('selected')});$('foveated').onclick=()=>{ar.foveated=!ar.foveated;$('foveated').classList.toggle('selected',ar.foveated)};$('deleteNearest').onclick=()=>{if(ar.objects.length){ar.objects.pop();const s=activeSpace();if(s){s.objects=ar.objects;saveDB()}}};$('arLab').onclick=()=>show('infoScreen');$('closeLab').onclick=()=>show('arScreen');
 $('interactive').onclick=()=>{ar.edit=true;$('interactive').classList.add('selected');$('visualMode').classList.remove('selected')};$('creationMode').onclick=()=>{ar.edit=true;$('creationMode').classList.add('selected');$('visualMode').classList.remove('selected')};$('visualMode').onclick=()=>{ar.edit=false;$('visualMode').classList.add('selected');$('creationMode').classList.remove('selected')};
 $('reset').onclick=()=>{if(confirm('¿Borrar todos los espacios?')){localStorage.removeItem(KEY);db={spaces:[],active:null};renderSpaces();renderLocal();updateSupport()}};
-function updateSupport(){const cam=!!navigator.mediaDevices?.getUserMedia;$('capBadge').textContent=cam?'CÁMARA':'CÁMARA NO DISPONIBLE';$('deviceReport').innerHTML=`CÁMARA <b>${cam?'✓':'—'}</b> · PROFUNDIDAD <b>NO</b> · GPS <b>NO USADO</b> · TRACKER <b>MONOCULAR + SFM</b>`;const s=activeSpace();$('simStatus').textContent=s?`Espacio activo: ${s.name} · ${s.points||0} puntos 3D · ${s.objects?.length||0} Bogones`:'Crea y guarda un espacio para entrar en AR'}
+function updateSupport(){const cam=!!navigator.mediaDevices?.getUserMedia;$('capBadge').textContent=cam?'CÁMARA':'CÁMARA NO DISPONIBLE';$('deviceReport').innerHTML=`CÁMARA <b>${cam?'✓':'—'}</b> · PROFUNDIDAD <b>NO</b> · ORIENTACIÓN <b>${('DeviceOrientationEvent' in window)?'DISPONIBLE':'VISUAL'}</b> · GPS <b>NO USADO</b> · TRACKER <b>MONOCULAR + ORIENTACIÓN</b>`;const s=activeSpace();$('simStatus').textContent=s?`Espacio activo: ${s.name} · ${s.points||0} puntos 3D · ${s.objects?.length||0} Bogones`:'Crea y guarda un espacio para entrar en AR'}
 updateSupport();renderSpaces();

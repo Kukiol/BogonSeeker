@@ -1,10 +1,10 @@
-BeyondHome ALFA 0.13.3 — World-space Bogon Map
+BeyondHome ALFA 0.13.4 — General Room / Bogon Spatial AR
 
-Esta versión corrige la colocación espacial de los Bogones del entorno.
+Esta versión mantiene la cámara RGB como fuente principal y añade fusión opcional de DeviceOrientation (giroscopio/brújula expuestos por el navegador). La profundidad del mapa es relativa: se obtiene por paralaje visual y triangulación cuando existe evidencia suficiente, con una hipótesis de profundidad gruesa como fallback.
 
-- Los anclajes azules se generan a partir de posiciones 3D fusionadas, no de coordenadas de pantalla.
-- Si un tracker verde todavía no tiene triangulación fiable, se crea una hipótesis espacial en el mismo marco de coordenadas de la cámara y se refina con observaciones posteriores.
-- El mapa guardado conserva los anclajes Bogon como puntos espaciales.
-- Al entrar en AR, esos anclajes se dibujan como cubos Bogon en sus coordenadas espaciales; no son decoraciones 2D.
-- La escala sigue siendo relativa/abstracta porque una cámara RGB monocular no proporciona metros absolutos.
-- Se mantiene el enfoque general de habitación: solidez espacial primero, detalle después.
+En AR, los Bogones se almacenan en coordenadas de mundo relativas y se proyectan mediante la pose de cámara. El tamaño visual se adapta a la profundidad: los Bogones cercanos se muestran mayores y los lejanos menores. El tracking visual corrige la traslación cuando encuentra referencias 3D.
+
+No se requiere LiDAR, ARCore, WebXR, GPS ni una API de profundidad.
+
+Versión: 0.13.4
+Build: 2026-08-16.13.4
