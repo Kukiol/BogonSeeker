@@ -106,8 +106,3 @@
 .scanGuide,.scanMetrics,.quality,.scanWait,.scanActions,.scanChecklist,.microcopy{position:relative!important;z-index:1!important;}
 /* Nunca permitimos que elementos posteriores se superpongan al viewport. */
 .scanStage + *{transform:none!important;}
-
-/* ALFA 0.13.8: entry must work even if app.js has not booted yet. */
-.heroBtn{display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer;}
-body:has(#home:target) #splash{display:none!important}
-body:has(#home:target) #home{display:flex!important;flex-direction:column}
