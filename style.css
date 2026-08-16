@@ -55,3 +55,54 @@
 .scanStage .scanAim,.scanStage .scanZones,.scanStage .scanLegend,.scanStage .scanStatus{z-index:20!important;}
 /* Evita que el contenedor general del visor introduzca un fondo negro sobre el vídeo. */
 .createScreen .scanStage *{backface-visibility:visible;}
+
+
+/* ALFA 0.13.2 — VISOR ESTRICTO
+   El viewport de cámara sólo contiene VIDEO + CANVAS transparente.
+   La leyenda/estado están FUERA del viewport para que ningún panel pueda
+   tapar la imagen aunque cambie el tamaño o el scroll del teléfono. */
+.scanStage{
+  position:relative!important;
+  isolation:isolate!important;
+  overflow:hidden!important;
+  background:transparent!important;
+  contain:layout paint!important;
+}
+.scanStage::before,.scanStage::after{display:none!important;content:none!important;}
+.scanStage video#scanCamera{
+  position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+  display:block!important;visibility:visible!important;opacity:1!important;
+  z-index:1!important;background:transparent!important;object-fit:cover!important;
+}
+.scanStage canvas#scanPreview{
+  position:absolute!important;inset:0!important;width:100%!important;height:100%!important;
+  display:block!important;visibility:visible!important;opacity:1!important;
+  z-index:2!important;background:transparent!important;
+  pointer-events:none!important;mix-blend-mode:normal!important;
+}
+.scanFocusGuide{
+  position:absolute!important;inset:0!important;z-index:3!important;
+  pointer-events:none!important;background:transparent!important;
+}
+.focusZone{position:absolute;top:8px;width:33.333%;text-align:center;font-size:6px;color:#d9e5ee;text-shadow:0 1px 5px #000;opacity:.8}
+.focusZone.left{left:0}.focusZone.center{left:33.333%}.focusZone.right{right:0}
+.focusReticle{position:absolute;left:50%;top:50%;width:72px;height:72px;transform:translate(-50%,-50%);border:1px solid rgba(113,232,255,.65);border-radius:18px;box-shadow:0 0 20px rgba(113,232,255,.12)}
+.focusReticle::before,.focusReticle::after{content:"";position:absolute;background:#71e8ff;opacity:.8}
+.focusReticle::before{left:50%;top:-7px;width:1px;height:14px}.focusReticle::after{top:50%;left:-7px;width:14px;height:1px}
+.scanLegend{
+  position:relative!important;z-index:1!important;display:flex!important;
+  margin:7px 2px 0!important;padding:6px 2px!important;
+  gap:6px!important;justify-content:center!important;flex-wrap:wrap!important;
+  background:transparent!important;border:0!important;backdrop-filter:none!important;
+  pointer-events:none!important;
+}
+.scanLegend span{background:#071018!important;border:1px solid rgba(255,255,255,.08)!important;padding:4px 6px!important;border-radius:999px!important;font-size:6px!important}
+.scanStatus{position:relative!important;z-index:1!important;display:block!important;
+  margin:5px 2px 0!important;padding:5px 7px!important;
+  background:transparent!important;border:0!important;
+  max-width:none!important;text-align:center!important;
+  font-size:6px!important;color:#9eabb7!important;
+}
+.scanGuide,.scanMetrics,.quality,.scanWait,.scanActions,.scanChecklist,.microcopy{position:relative!important;z-index:1!important;}
+/* Nunca permitimos que elementos posteriores se superpongan al viewport. */
+.scanStage + *{transform:none!important;}
