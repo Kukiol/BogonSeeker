@@ -1,18 +1,18 @@
 'use strict';
-// BeyondHome ALFA 0.13.4 — monocular Bogon spatial mapper with optional device orientation.
+// BeyondHome ALFA 0.13.5 — coarse spatial Bogon mapper with IMU-assisted orientation and sparse map display.
 // RGB remains the primary source. Gyroscope/compass orientation is used when the browser exposes it;
 // visual references remain the fallback. No depth sensor or ARCore/WebXR dependency is required.
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.13.4';
-const BUILD_ID='2026-08-16.13.4';
-const KEY='beyondHome.v34';
+const APP_VERSION='0.13.5';
+const BUILD_ID='2026-08-16.13.5';
+const KEY='beyondHome.v35';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v34')||localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 // Old service workers/caches can keep a previous HTML/JS build on a phone. This build deliberately removes them.
 (async()=>{try{if('serviceWorker' in navigator){for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}if('caches' in window){for(const k of await caches.keys())await caches.delete(k)}}catch(e){console.debug('cache cleanup',e)}})();
 function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}catch{toast('No se pudo guardar el mapa.');return false}}
@@ -177,8 +177,8 @@ function poseError(pose,corr){let e=0,n=0;for(const c of corr){const q=project(c
 function refinePose(pose,corr){if(corr.length<6)return{pose,error:999};let cur={R:pose.R.map(r=>r.slice()),t:[...pose.t]};for(let it=0;it<3;it++){const H=Array.from({length:6},()=>Array(6).fill(0)),g=Array(6).fill(0);let used=0;for(const c of corr){const q=project(c.p,cur);if(!q)continue;const rx=c.x-q.x,ry=c.y-q.y;if(Math.hypot(rx,ry)>40)continue;const J=[];for(let k=0;k<6;k++){const pp={R:cur.R.map(r=>r.slice()),t:[...cur.t]},eps=k<3?.004:.003;if(k<3)pp.t[k]+=eps;else pp.R=mul3(compose(k===3?eps:0,k===4?eps:0,k===5?eps:0),pp.R);const qq=project(c.p,pp);J.push(qq?[(qq.x-q.x)/eps,(qq.y-q.y)/eps]:[0,0])}for(let a=0;a<6;a++){g[a]+=J[a][0]*rx+J[a][1]*ry;for(let b=0;b<6;b++)H[a][b]+=J[a][0]*J[b][0]+J[a][1]*J[b][1]}used++}const d=solve(H.map((r,i)=>r.map((v,j)=>v+(i===j?.002:0))),g);if(!d||used<6)break;cur.t=cur.t.map((v,i)=>v+d[i]);cur.R=mul3(compose(d[3],d[4],d[5]),cur.R)}return{pose:cur,error:poseError(cur,corr)}}
 function matchDescriptors(features,map){const arr=[...map.values()].filter(p=>p.d&&p.n>=2),out=[];for(const f of features){let best=null,be=999;for(const p of arr){let e=0;for(let i=0;i<f.d.length;i++)e+=Math.abs(f.d[i]-p.d[i]);e/=f.d.length;if(e<be){be=e;best=p}}if(best&&be<24)out.push({f,p:best,e:be})}return out}
 
-const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[],trackKeys:new Map(),bogonAnchors:new Map()};
-function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[],trackKeys:new Map(),bogonAnchors:new Map()});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
+const scan={running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[],trackKeys:new Map(),bogonAnchors:new Map(),sensorRLast:null};
+function resetScannerUI(){Object.assign(scan,{running:false,started:0,last:0,prev:null,features:[],pose:{R:I3(),t:[0,0,0]},map:new Map(),keyframes:0,lastKey:0,baseline:0,good:0,coverage:new Map(),zones:new Map(),motion:0,coh:0,status:'READY',raf:0,phase:'HOLD',motionKind:'QUIETO',lastMotion:{dx:0,dy:0,mag:0},stable:[],trackKeys:new Map(),bogonAnchors:new Map(),sensorRLast:null});$('scanStart').disabled=false;$('scanFinish').disabled=true;$('scanStart').textContent='INICIAR ESCANEO';$('scanPercent').textContent='0%';$('scanPts').textContent='0';$('scanRefs').textContent='0';$('scanTime').textContent='0.0';$('scanQuality').textContent='Esperando';$('qualityBar').style.width='0%'}
 function scanTime(){return scan.started?(performance.now()-scan.started)/1000:0}
 function secured(){return scan.bogonAnchors.size}
 function greenCount(){return scan.stable.filter(a=>a.hits>=4).length}
@@ -385,8 +385,10 @@ function scannerLoop(){
     // Seed the first frame as image references. They stay red until 3D evidence exists.
     if(!scan.features.length&&f.length){scan.features=f;}
     if(matches.length>=6&&flow.coh>.20&&flow.mag>.45&&(!scan.lastKey||now-scan.lastKey>480)){
-      const rel=estimateRelative(matches);
-      if(rel){
+      const visualRel=estimateRelative(matches);
+      if(visualRel){
+        const imuRel=sensorRelativeRotation();
+        const rel={...visualRel,R:imuRel||visualRel.R};
         const oldPose={R:scan.pose.R.map(r=>r.slice()),t:[...scan.pose.t]};
         const newR=mul3(rel.R,oldPose.R);
         const newT=mv(rel.R,oldPose.t).map((v,i)=>v+rel.t[i]);
@@ -433,6 +435,8 @@ async function startScanner(){
     $('scanHint').textContent='Solicitando acceso a la cámara…';
     await openCamera($('scanCamera'));
     scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;scan.features=[];
+    scan.sensorRLast=null;
+    await startOrientationSensors();
     $('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';
     const waitHUD=$('scanWait'); if(waitHUD)waitHUD.textContent='Sólo cámara · quieto 1 s y después gira suavemente por la habitación';
     toast('Cámara activa. Quieto 1 s; después gira suavemente y apunta a distintas zonas. No necesitas caminar.');
@@ -444,14 +448,72 @@ async function startScanner(){
     toast(e.message||'No se pudo iniciar la cámara.');
   }
 }
-function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf)}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,depth:Math.max(.28,...a.trackers.map(id=>scan.stable.find(t=>t.id===id)?.depth||0)),bogon:true,anchorId:a.id,zone:a.zone};});const samples=[...pts,...anchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-monocular-bogon-coarse-v14-orientation-depth',scale:'abstract-relative',version:34,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
+function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf);stopOrientationSensors();scan.sensorRLast=null}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,depth:Math.max(.28,...a.trackers.map(id=>scan.stable.find(t=>t.id===id)?.depth||0)),bogon:true,anchorId:a.id,zone:a.zone};});const sparsePts=sparsifyWorldPoints(pts,48);const samples=[...sparsePts,...anchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-monocular-bogon-coarse-v15-imu-depth',scale:'abstract-relative',version:35,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
+function sparsifyWorldPoints(points,maxCount=48){
+  const sorted=[...points].sort((a,b)=>pointReliability(b)-pointReliability(a));
+  const out=[];
+  const cell=.22;
+  const used=new Set();
+  for(const p of sorted){
+    const k=`${Math.floor(p.x/cell)},${Math.floor(p.y/cell)},${Math.floor(p.z/cell)}`;
+    if(used.has(k))continue;
+    used.add(k);out.push(p);
+    if(out.length>=maxCount)break;
+  }
+  return out;
+}
 $('scanStart').onclick=startScanner;$('scanFinish').onclick=finishScan;
 
 // ---------- Spaces / map ----------
 function renderSpaces(){const el=$('spaceList');if(!el)return;el.innerHTML=db.spaces.length?db.spaces.map(s=>`<div class="spaceItem"><div><b>${esc(s.name)}</b><span>${s.points||0} puntos · ${s.secured||0} consolidados · ${esc(s.created)}</span></div><div class="spaceBtns"><button data-open="${s.id}">USAR</button><button data-del="${s.id}">BORRAR</button></div></div>`).join(''):`<div class="empty"><h2>No hay espacios</h2><p>Crea el primero usando únicamente la cámara.</p></div>`;el.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{db.active=b.dataset.open;saveDB();show('simScreen')});el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{db.spaces=db.spaces.filter(s=>s.id!==b.dataset.del);if(db.active===b.dataset.del)db.active=db.spaces[0]?.id||null;saveDB();renderSpaces();renderLocal()})}
 let mapView={yaw:.5,pitch:-.35,zoom:1};
-function renderLocal(){const c=$('localMap');if(!c)return;const s=activeSpace();$('localTitle').textContent=s?s.name:'Sin espacio';const d=devicePixelRatio||1,w=c.clientWidth||innerWidth,h=c.clientHeight||innerHeight;c.width=w*d;c.height=h*d;const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.fillStyle='#05070b';x.fillRect(0,0,w,h);if(!s){$('localMeta').textContent='Crea y guarda un espacio para ver su nube 3D.';return}const cy=Math.cos(mapView.yaw),sy=Math.sin(mapView.yaw),cp=Math.cos(mapView.pitch),sp=Math.sin(mapView.pitch),pts=s.samples||[],q=[];for(const p of pts){let X=p.x*cy-p.z*sy,Z=p.x*sy+p.z*cy,Y=p.y*cp-Z*sp;Z=p.y*sp+Z*cp;q.push({x:w/2+X*320,y:h/2-Y*320,z:Z,r:pointReliability(p)})}q.sort((a,b)=>b.z-a.z);for(let i=0;i<q.length;i++){let links=0;for(let j=i+1;j<q.length&&links<4;j++){const dx=q[i].x-q[j].x,dy=q[i].y-q[j].y;if(Math.hypot(dx,dy)<85){x.strokeStyle=colorForReliability(Math.min(q[i].r,q[j].r))+'55';x.lineWidth=1;x.beginPath();x.moveTo(q[i].x,q[i].y);x.lineTo(q[j].x,q[j].y);x.stroke();links++}}}for(const p of q){const r=clamp(3-p.z*.7,.9,3.4);x.fillStyle=colorForReliability(p.r);x.fillRect(p.x-r/2,p.y-r/2,r,r)}$('localMeta').textContent=`${pts.length} puntos 3D · ${s.secured||0} consolidados · rojo=necesita evidencia · verde=alta confianza · escala relativa · sólo cámara`}
+function renderLocal(){
+  const c=$('localMap');if(!c)return;
+  const s=activeSpace();$('localTitle').textContent=s?s.name:'Sin espacio';
+  const d=devicePixelRatio||1,w=c.clientWidth||innerWidth,h=c.clientHeight||innerHeight;
+  c.width=w*d;c.height=h*d;
+  const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);
+  x.fillStyle='#05070b';x.fillRect(0,0,w,h);
+  if(!s){$('localMeta').textContent='Crea y guarda un espacio para ver su mapa Bogon.';return}
+  const cy=Math.cos(mapView.yaw),sy=Math.sin(mapView.yaw),cp=Math.cos(mapView.pitch),sp=Math.sin(mapView.pitch);
+  // The editor intentionally shows a sparse representation: anchors first, then a
+  // small reliability-filtered sample. The dense tracking cloud remains in the logic
+  // but is never dumped wholesale into this canvas.
+  const anchors=(s.samples||[]).filter(p=>p.bogon);
+  const rest=(s.samples||[]).filter(p=>!p.bogon&&pointReliability(p)>=.55).slice(0,24);
+  const pts=[...anchors,...rest];
+  if(!pts.length){$('localMeta').textContent='Mapa vacío.';return}
+  const span=Math.max(.8,...pts.map(p=>Math.max(Math.abs(p.x),Math.abs(p.y),Math.abs(p.z))));
+  const scale=Math.min(w,h)*.34/(span*1.25)*mapView.zoom;
+  const q=[];
+  for(const p of pts){
+    let X=p.x*cy-p.z*sy,Z=p.x*sy+p.z*cy,Y=p.y*cp-Z*sp;Z=p.y*sp+Z*cp;
+    q.push({x:w/2+X*scale,y:h/2-Y*scale,z:Z,r:pointReliability(p),bogon:!!p.bogon,p});
+  }
+  q.sort((a,b)=>b.z-a.z);
+  // Only connect nearby Bogon anchors; this keeps the visual map readable.
+  for(let i=0;i<q.length;i++){
+    if(!q[i].bogon)continue;
+    let links=0;
+    for(let j=i+1;j<q.length&&links<3;j++){
+      if(!q[j].bogon)continue;
+      const dx=q[i].p.x-q[j].p.x,dy=q[i].p.y-q[j].p.y,dz=q[i].p.z-q[j].p.z;
+      if(Math.hypot(dx,dy,dz)<.65){
+        x.strokeStyle='#4da6ff44';x.lineWidth=1;x.beginPath();x.moveTo(q[i].x,q[i].y);x.lineTo(q[j].x,q[j].y);x.stroke();links++;
+      }
+    }
+  }
+  for(const p of q){
+    const perspective=clamp(1.25/(1.15+p.z*.65),.55,1.5);
+    const r=p.bogon?clamp(5*perspective,2.2,7):clamp(2.5*perspective,1.2,3.5);
+    x.fillStyle=p.bogon?'#4da6ff':colorForReliability(p.r);
+    x.globalAlpha=p.bogon?1:.7;
+    x.beginPath();x.arc(p.x,p.y,r,0,Math.PI*2);x.fill();
+    x.globalAlpha=1;
+  }
+  $('localMeta').textContent=`${anchors.length} Bogones espaciales + ${rest.length} referencias · mapa visual reducido · profundidad relativa · escala abstracta`;
+}
 $('mapReset').onclick=()=>{mapView={yaw:.5,pitch:-.35,zoom:1};renderLocal()};let drag=null;$('localMap').addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,yaw:mapView.yaw,pitch:mapView.pitch}});$('localMap').addEventListener('pointermove',e=>{if(!drag)return;mapView.yaw=drag.yaw+(e.clientX-drag.x)*.01;mapView.pitch=clamp(drag.pitch+(e.clientY-drag.y)*.01,-1.4,1.4);renderLocal()});['pointerup','pointercancel','pointerleave'].forEach(ev=>$('localMap').addEventListener(ev,()=>drag=null));
 
 // ---------- Explanation ----------
@@ -479,6 +541,14 @@ function sensorRotation(){
   const d=orientationDelta();if(!d)return null;
   // Pose is world -> camera, therefore the camera's measured orientation is inverted.
   return compose(-d.pitch*Math.PI/180,-d.yaw*Math.PI/180,-d.roll*Math.PI/180);
+}
+function sensorRelativeRotation(){
+  const absolute=sensorRotation();
+  if(!absolute)return null;
+  const previous=scan.sensorRLast||I3();
+  const relative=mul3(absolute,mt(previous));
+  scan.sensorRLast=absolute;
+  return relative;
 }
 async function startOrientationSensors(){
   imu.supported=('DeviceOrientationEvent' in window);
