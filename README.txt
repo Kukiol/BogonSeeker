@@ -1,4 +1,4 @@
-BeyondHome ALFA 0.12 — Bogon Zones / Tracker Lock
+BeyondHome ALFA 0.13 — Bogon Zones / Tracker Lock
 
 CAMERA ONLY. No GPS, depth sensor, IMU, ARCore, WebXR or external libraries.
 
@@ -20,11 +20,21 @@ Recommended use:
 5. Move to another screen zone and repeat. Three zones are enough to save.
 
 
-ALFA 0.12: ciclo visual de referencias RED/ORANGE/YELLOW/GREEN/BLUE. El azul representa puntos triangulados que entran en la malla Bogon; no se exige precisión métrica absoluta.
+ALFA 0.13: ciclo visual de referencias RED/ORANGE/YELLOW/GREEN/BLUE. El azul representa puntos triangulados que entran en la malla Bogon; no se exige precisión métrica absoluta.
 
 
-ALFA 0.12 — MODO MAPA GENERAL
+ALFA 0.13 — MODO MAPA GENERAL
 - El escaneo prioriza cobertura por zonas y forma general de la habitación, no detalle fotogramétrico.
 - El azul es un anclaje espacial Bogon provisional: varios trackers han contribuido a fijarlo y podrá refinarse posteriormente.
 - El usuario no necesita caminar por la habitación: basta con cubrir visualmente izquierda/centro/derecha con pequeños giros y desplazamientos suaves.
 - El detalle fino queda reservado para un modo avanzado posterior.
+
+
+ALFA 0.13 — MAPA GENERAL SOLIDO
+- El azul ya no depende de conseguir una triangulación fotogramétrica perfecta.
+- Dos o más trackers verdes estables dentro de una zona generan un anclaje Bogon azul.
+- Los anclajes usan coordenadas abstractas relativas: priorizan continuidad y solidez del entorno sobre precisión métrica.
+- El usuario puede permanecer prácticamente en el sitio y girar suavemente para cubrir izquierda, centro y derecha.
+- El mapa se puede guardar cuando existen al menos 2 zonas y 4 anclajes azules.
+- Los puntos azules se consideran parte de la malla Bogon general y el detalle puede refinarse posteriormente.
+- Se incrementa la versión de almacenamiento y se limpia cualquier Service Worker/Cache Storage antiguo al arrancar.
