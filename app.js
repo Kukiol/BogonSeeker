@@ -6,14 +6,14 @@
 // Monocular scale is relative: a single RGB camera cannot recover absolute metres by itself.
 const $=id=>document.getElementById(id);
 const SCREENS=['splash','home','cameraScreen','createScreen','spacesScreen','localScreen','infoScreen','simScreen','arScreen'];
-const APP_VERSION='0.13.7';
-const BUILD_ID='2026-08-16.13.7';
-const KEY='beyondHome.v37';
+const APP_VERSION='0.13.8';
+const BUILD_ID='2026-08-16.13.8';
+const KEY='beyondHome.v38';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const uid=()=>crypto?.randomUUID?.()||'bh-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let db=loadDB(); let stream=null;
-function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v36')||localStorage.getItem('beyondHome.v35')||localStorage.getItem('beyondHome.v34')||localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
+function loadDB(){try{const now=localStorage.getItem(KEY);if(now)return JSON.parse(now);const old=localStorage.getItem('beyondHome.v37')||localStorage.getItem('beyondHome.v36')||localStorage.getItem('beyondHome.v35')||localStorage.getItem('beyondHome.v34')||localStorage.getItem('beyondHome.v33')||localStorage.getItem('beyondHome.v32')||localStorage.getItem('beyondHome.v30')||localStorage.getItem('beyondHome.v28')||localStorage.getItem('beyondHome.v27')||localStorage.getItem('beyondHome.v25')||localStorage.getItem('beyondHome.v21');return old?JSON.parse(old):{spaces:[],active:null}}catch{return{spaces:[],active:null}}}
 // Aggressive client-cache cleanup for phone browsers. There is no service worker in this build;
 // nevertheless remove old registrations/caches and stamp the document with the current build.
 (async()=>{try{if('serviceWorker' in navigator){for(const r of await navigator.serviceWorker.getRegistrations())await r.unregister()}if('caches' in window){for(const k of await caches.keys())await caches.delete(k)}document.documentElement.dataset.build=BUILD_ID;}catch(e){console.debug('cache cleanup',e)}})();
@@ -21,9 +21,9 @@ function saveDB(){try{localStorage.setItem(KEY,JSON.stringify(db));return true}c
 function activeSpace(){return db.spaces.find(s=>s.id===db.active)||null}
 function toast(m){const t=$('arToast'); if(t){t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}else console.log(m)}
 function show(id){stopScanner();if(id!=='arScreen')stopAR();if(id!=='cameraScreen'&&id!=='createScreen'&&id!=='arScreen')stopCamera();SCREENS.forEach(s=>$(s)?.classList.toggle('active',s===id));if(id==='spacesScreen')renderSpaces();if(id==='localScreen')renderLocal();if(id==='infoScreen')startInfo();else stopInfo();updateSupport()}
-window.__bhEnter=()=>show('home');
+window.__bhEnter=()=>{try{SCREENS.forEach(s=>$(s)?.classList.toggle('active',s==='home'));updateSupport()}catch(e){console.warn('entry fallback',e);document.getElementById('splash')?.classList.remove('active');document.getElementById('home')?.classList.add('active')}};
 const enterBtn=$('enter');
-if(enterBtn)enterBtn.onclick=window.__bhEnter;
+if(enterBtn){enterBtn.addEventListener('click',e=>{e.preventDefault();window.__bhEnter()});enterBtn.addEventListener('touchend',e=>{e.preventDefault();window.__bhEnter()},{passive:false});}
 async function openCamera(video){
   if(!navigator.mediaDevices?.getUserMedia)throw Error('Este navegador no permite cámara. Usa Chrome/Edge con HTTPS.');
   if(!video)throw Error('Visor de cámara no encontrado.');
@@ -439,7 +439,6 @@ async function startScanner(){
     await openCamera($('scanCamera'));
     scan.running=true;scan.started=performance.now();scan.last=0;scan.prev=null;scan.features=[];
     scan.sensorRLast=null;
-    await startOrientationSensors();
     $('scanStart').disabled=true;$('scanStart').textContent='ESCANEANDO…';
     const waitHUD=$('scanWait'); if(waitHUD)waitHUD.textContent='Sólo cámara · quieto 1 s y después gira suavemente por la habitación';
     toast('Cámara activa. Quieto 1 s; después gira suavemente y apunta a distintas zonas. No necesitas caminar.');
@@ -451,8 +450,8 @@ async function startScanner(){
     toast(e.message||'No se pudo iniciar la cámara.');
   }
 }
-function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf);stopOrientationSensors();scan.sensorRLast=null}
-function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,depth:Math.max(.28,...a.trackers.map(id=>scan.stable.find(t=>t.id===id)?.depth||0)),bogon:true,anchorId:a.id,zone:a.zone};});const sparsePts=sparsifyWorldPoints(pts,32);const sparseAnchors=sparsifyBogons(anchors,40,.55);const samples=[...sparsePts,...sparseAnchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-monocular-bogon-coarse-v16-visual-depth',scale:'abstract-relative',version:36,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
+function stopScanner(){scan.running=false;cancelAnimationFrame(scan.raf);scan.sensorRLast=null}
+function finishScan(){if(!canSave()){toast('Aún falta evidencia 3D. Sigue moviéndote y reforzando zonas rojas.');return}stopScanner();const pts=[...scan.map.values()].filter(p=>p.n>=2&&pointReliability(p)>.35);const anchors=[...scan.bogonAnchors.values()].map(a=>{const src=a.trackers.map(id=>spatialForTracker(id)).find(p=>p&&p.d)||null;return {x:a.x,y:a.y,z:a.z,n:Math.max(2,a.n),obs:a.n,trackers:a.trackers,confidence:a.confidence,err:Math.max(.06,a.spread||.12),d:src?.d||null,depth:Math.max(.28,...a.trackers.map(id=>scan.stable.find(t=>t.id===id)?.depth||0)),bogon:true,anchorId:a.id,zone:a.zone};});const sparsePts=sparsifyWorldPoints(pts,32);const sparseAnchors=sparsifyBogons(anchors,40,.55);const samples=[...sparsePts,...sparseAnchors];const s={id:uid(),name:(($('spaceName').value||'Mi espacio').trim()),created:new Date().toLocaleString(),method:'camera-monocular-bogon-coarse-v16-visual-depth',scale:'abstract-relative',version:38,appVersion:APP_VERSION,build:BUILD_ID,coverage:readiness(),points:samples.length,secured:anchors.length,samples,objects:[],camera:{fx:FX,fy:FY,width:SW,height:SH}};db.spaces.push(s);db.active=s.id;saveDB();renderSpaces();renderLocal();updateSupport();toast(`Mapa guardado · ${samples.length} puntos Bogon`);setTimeout(()=>show('simScreen'),200)}
 function sparsifyWorldPoints(points,maxCount=32){
   const sorted=[...points].sort((a,b)=>pointReliability(b)-pointReliability(a));
   const out=[];
